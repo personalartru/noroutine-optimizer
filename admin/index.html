@@ -530,7 +530,7 @@ function bindFieldEvents(scope) {
       preview.innerHTML = allowedTags(esc(renderTemplate(area.value, S.schema.demo))) ||
         '<span class="small">пусто</span>';
       box.querySelector('[data-role="change"]')?.remove();
-      if (JSON.stringify(pathGet(S.loaded, box.dataset.path)) !== area.value) {
+      if (JSON.stringify(pathGet(S.loaded, box.dataset.path)) !== JSON.stringify(area.value)) {
         const head = box.querySelector(".fhead");
         head.insertAdjacentHTML("afterbegin",
           '<span class="badge" data-role="change">правка</span>');
@@ -542,12 +542,11 @@ function bindFieldEvents(scope) {
         }
       }
       box.classList.toggle("changed",
-        JSON.stringify(pathGet(S.loaded, box.dataset.path)) !== area.value);
+        JSON.stringify(pathGet(S.loaded, box.dataset.path)) !== JSON.stringify(area.value));
       box.querySelector("[data-count]").textContent =
         `${area.value.length} символов · лимит сообщения ${S.schema.limits.text_chunk}`;
     });
     area.dispatchEvent(new Event("input"));
-    area.addEventListener("focus", () => area.select?.() && null);
   });
   scope.querySelectorAll(".chip[data-var]").forEach(chip => {
     chip.addEventListener("click", () => {
@@ -884,7 +883,8 @@ function afterEdit(card) { saveDraft(); markChanged(card); }
 function markChanged(card) {
   card.querySelectorAll?.(".field").forEach(f => {
     const value = f.querySelector("textarea[data-field]")?.value;
-    f.classList.toggle("changed", JSON.stringify(pathGet(S.loaded, f.dataset.path)) !== value);
+    f.classList.toggle("changed",
+      JSON.stringify(pathGet(S.loaded, f.dataset.path)) !== JSON.stringify(value));
   });
 }
 
@@ -985,7 +985,9 @@ $("#set-forget").addEventListener("click", () => {
   $("#set-token").value = "";
   renderChangesPill();
 });
-$("#btn-start").addEventListener("click", () => S.token ? loadAll() : openSettings());
+/* Файл читается анонимно: без токена страница показывает и правит черновик,
+   но не даёт коммитить — кнопка «Сохранить» неактивна, токен добавляют в «Доступе». */
+$("#btn-start").addEventListener("click", () => loadAll());
 $("#btn-reload").addEventListener("click", () => {
   if (changedPaths().length &&
       !confirm("Отменить несохранённые правки и перечитать файл из репозитория?")) return;
