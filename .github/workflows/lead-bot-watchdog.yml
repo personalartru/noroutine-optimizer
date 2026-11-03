@@ -66,7 +66,7 @@ jobs:
           print(running, busy, age)
           PY
           read -r running busy age < /tmp/state.txt
-          echo "В работе: $running, в очереди: $busy, последняя отметка: $age мин назад"
+          echo "В работе: $running, в работе+очереди: $busy, последняя отметка: $age мин назад"
 
           notify() {
             if [[ -n "${TELEGRAM_BOT_TOKEN:-}" && -n "${LEAD_ADMIN_CHAT_ID:-}" ]]; then

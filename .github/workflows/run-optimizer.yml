@@ -94,7 +94,9 @@ jobs:
           REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
         run: python max_bot.py --minutes "${{ inputs.minutes || '9' }}"
       - name: Сохранить состояние
-        if: always()
+        # only when we actually polled: без токена файлов нет, и save@v4
+        # ругался «Cache save failed» — лишняя жёлтая метка в зелёном прогоне.
+        if: always() && steps.probe.outputs.ready == 'true'
         uses: actions/cache/save@v4
         with:
           path: |
@@ -149,7 +151,8 @@ jobs:
             echo "::warning::попытка $attempt: в очереди пусто, повторяем"
           done
           echo "::error::не удалось поставить следующий цикл за 3 попытки: " \
-               "цепочка встанет до сторожа lead-bot-watchdog.yml. Вручную — gh workflow run «WF» --ref main"
+               "цепочка встанет до сторожа lead-bot-watchdog.yml. " \
+               "Вручную: gh workflow run \"$WF\" --repo $REPO --ref main"
           # Падаем специально: мертвую цепочку видно в списке прогонов,
           # а не только в чужом логе, который никто не открывает.
           exit 1
