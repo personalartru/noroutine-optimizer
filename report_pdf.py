@@ -79,6 +79,12 @@ def font_bold():
     return _first_existing(BOLD_CANDIDATES) or font_regular()
 
 
+# Пути ищутся при каждой сборке отчёта (и в цикле уплотнения ниже), а набор
+# шрифтов за жизнь цикла не меняется.
+font_regular = functools.lru_cache(maxsize=1)(font_regular)
+font_bold = functools.lru_cache(maxsize=1)(font_bold)
+
+
 def available():
     """PDF соберём только если есть fpdf2 и шрифт с кириллицей."""
     return bool(FPDF and font_regular())
@@ -120,22 +126,22 @@ INK = (25, 25, 25)
 ACCENT = (20, 90, 160)
 
 
-def _heading(pdf, text):
+def _heading(pdf, text, k=1.0):
     pdf.set_font("body", "B", size=11.5)
     pdf.set_text_color(*ACCENT)
-    pdf.cell(0, 7, clean(text), new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6.4 * k, clean(text), new_x="LMARGIN", new_y="NEXT")
     pdf.set_text_color(*INK)
     pdf.set_font("body", size=10)
 
 
-def _para(pdf, text, size=10, grey=False, height=5.0):
+def _para(pdf, text, size=10, grey=False, height=4.8, k=1.0):
     pdf.set_font("body", size=size)
     pdf.set_text_color(*(GREY if grey else INK))
-    pdf.multi_cell(0, height, clean(text), new_x="LMARGIN", new_y="NEXT")
+    pdf.multi_cell(0, height * k, clean(text), new_x="LMARGIN", new_y="NEXT")
     pdf.set_text_color(*INK)
 
 
-def _row(pdf, label, value):
+def _row(pdf, label, value, k=1.0):
     """Две колонки: пояснение слева, цифра справа жирным.
 
     multi_cell сам переносит курсор на новую строку, поэтому обе колонки стартуют
@@ -146,13 +152,14 @@ def _row(pdf, label, value):
     y0 = pdf.get_y()
     pdf.set_font("body", size=10)
     pdf.set_xy(pdf.l_margin, y0)
-    pdf.multi_cell(label_w, 5.0, clean(label), new_x="LMARGIN", new_y="NEXT")
+    pdf.multi_cell(label_w, 4.8 * k, clean(label), new_x="LMARGIN", new_y="NEXT")
     y_label = pdf.get_y()
     pdf.set_font("body", "B", size=10)
     pdf.set_xy(pdf.l_margin + label_w, y0)
-    pdf.multi_cell(width - label_w, 5.0, clean(value), new_x="LMARGIN", new_y="NEXT")
+    pdf.multi_cell(width - label_w, 4.8 * k, clean(value), new_x="LMARGIN",
+                   new_y="NEXT")
     pdf.set_font("body", size=10)
-    pdf.set_y(max(y_label, pdf.get_y()) + 0.8)
+    pdf.set_y(max(y_label, pdf.get_y()) + 0.5 * k)
 
 
 def _adapt_fonts(data):
@@ -174,14 +181,11 @@ def _adapt_fonts(data):
     return json.loads(text) if changed else data
 
 
-def build(data):
-    """bytes с отчётом. `data` — структура из optimizer.report_data()."""
-    if not available():
-        raise RuntimeError("PDF недоступен: нет fpdf2 или кириллического шрифта")
-    data = _adapt_fonts(data)
+def _render(data, k):
+    """Один проход вёрстки с коэффициентом высоты строк `k`."""
     pdf = Report(orientation="P", unit="mm", format="A4")
-    pdf.set_auto_page_break(auto=True, margin=16)
-    pdf.set_margins(16, 16, 16)
+    pdf.set_auto_page_break(auto=True, margin=14)
+    pdf.set_margins(16, 14, 16)
     pdf.add_font("body", "", font_regular())
     bold = font_bold()
     if bold:
@@ -191,60 +195,79 @@ def build(data):
     # шапка
     pdf.set_font("body", size=9)
     pdf.set_text_color(*GREY)
-    pdf.cell(0, 5, f"{clean(data.get('date', ''))} · расчёт «Оптимизатора»",
+    pdf.cell(0, 4.6 * k, f"{clean(data.get('date', ''))} · расчёт «Оптимизатора»",
              new_x="LMARGIN", new_y="NEXT")
     pdf.set_text_color(*INK)
-    pdf.set_font("body", "B", size=17)
-    pdf.multi_cell(0, 8, clean(data.get("title") or "Отчёт оптимизатора"),
-                 new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("body", size=10)
+    pdf.set_font("body", "B", size=16)
+    pdf.multi_cell(0, 7.4 * k, clean(data.get("title") or "Отчёт оптимизатора"),
+                   new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("body", size=9.5)
     subtitle = " · ".join(part for part in (clean(data.get("who", "")),
                                             f"{clean(data.get('people', ''))} чел",
                                             clean(data.get("rate", "")),
                                             clean(data.get("headline", ""))) if part)
     pdf.set_text_color(*GREY)
-    pdf.multi_cell(0, 5.5, subtitle, new_x="LMARGIN", new_y="NEXT")
+    pdf.multi_cell(0, 5.0 * k, subtitle, new_x="LMARGIN", new_y="NEXT")
     pdf.set_text_color(*INK)
-    pdf.ln(3)
+    pdf.ln(2 * k)
 
-    _heading(pdf, "Рутина по операциям")
+    _heading(pdf, "Рутина по операциям", k)
     ops = data.get("ops") or []
     if ops:
         for op in ops:
             _row(pdf, op.get("title", ""),
                  " · ".join(p for p in (clean(op.get("value", "")),
-                                        clean(op.get("note", ""))) if p))
+                                        clean(op.get("note", ""))) if p), k)
     else:
-        _para(pdf, "Операции не выбраны.", grey=True)
+        _para(pdf, "Операции не выбраны.", grey=True, k=k)
 
-    _heading(pdf, "Экономия")
+    _heading(pdf, "Экономия", k)
     for label, value in (data.get("figures") or []):
-        _row(pdf, label, value)
+        _row(pdf, label, value, k)
 
-    _heading(pdf, "Инструменты и бюджет")
+    _heading(pdf, "Инструменты и бюджет", k)
     for tool in (data.get("tools") or []):
-        _row(pdf, tool.get("title", ""), clean(tool.get("value", "")))
+        _row(pdf, tool.get("title", ""), clean(tool.get("value", "")), k)
         if tool.get("note"):
-            _para(pdf, tool["note"], size=9, grey=True, height=4.4)
+            _para(pdf, tool["note"], size=8.8, grey=True, height=4.2, k=k)
     for label, value in (data.get("budget") or []):
-        _row(pdf, label, value)
+        _row(pdf, label, value, k)
 
-    _heading(pdf, "Чек-лист внедрения")
+    _heading(pdf, "Чек-лист внедрения", k)
     for step in (data.get("steps") or []):
-        pdf.set_font("body", "B", size=10.5)
-        pdf.multi_cell(0, 5.2,
+        pdf.set_font("body", "B", size=10.2)
+        pdf.multi_cell(0, 4.9 * k,
                        f"{step.get('num', '')}. {clean(step.get('title', ''))} "
                        f"— {clean(step.get('when', ''))}",
                        new_x="LMARGIN", new_y="NEXT")
-        _para(pdf, step.get("body", ""), size=9.5, grey=True, height=4.6)
-        pdf.ln(1.4)
+        _para(pdf, step.get("body", ""), size=9.2, grey=True, height=4.3, k=k)
+        pdf.ln(1.0 * k)
 
-    pdf.ln(1)
-    _heading(pdf, "Как читать цифры")
-    _para(pdf, data.get("disclaimer", ""), size=9, grey=True, height=4.6)
+    _heading(pdf, "Как читать цифры", k)
+    _para(pdf, data.get("disclaimer", ""), size=8.8, grey=True, height=4.3, k=k)
     channel = clean(data.get("channel", ""))
     if channel:
-        pdf.ln(1.5)
-        _para(pdf, f"Разборы и готовые связки: {channel}", size=9)
+        pdf.ln(1.2 * k)
+        _para(pdf, f"Разборы и готовые связки: {channel}", size=9, k=k)
+    return pdf
 
+
+def build(data):
+    """bytes с отчётом. `data` — структура из optimizer.report_data().
+
+    Отчёт задуман на одну страницу: у семи шагов и четырёх инструментов запаса
+    по высоте нет, и длинный расчёт выталкивал пару строк на второй лист, где
+    они выглядели брошенными. Поэтому сначала обычная вёрстка, а если вторая
+    страница оказалась полупустой — уплотняем межстрочные высоты (шрифт не
+    трогаем) и пересобираем.
+    """
+    if not available():
+        raise RuntimeError("PDF недоступен: нет fpdf2 или кириллического шрифта")
+    data = _adapt_fonts(data)
+    for k in (1.0, 0.9, 0.82):
+        pdf = _render(data, k)
+        # на второй странице осталось меньше трети высоты — стоит уплотниться
+        sparse = pdf.pages_count > 1 and pdf.get_y() < 14 + (297 - 28) * 0.35
+        if not sparse:
+            break
     return bytes(pdf.output())
