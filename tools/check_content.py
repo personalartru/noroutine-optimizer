@@ -11,6 +11,10 @@
 должен падать и не должен показывать пустое сообщение: он отдаёт код-дефолт и
 пишет в предупреждения.
 
+Третий блок — вёрстка пустыми строками: их число сверяется на каждом звене
+цепочки (файл → оверлей → подстановка переменных → резка на сообщения). Теряются
+они тихо, а в чате превращаются в склеенные строки.
+
     python3 tools/check_content.py            # проверки
     python3 tools/check_content.py --dump     # перегенерить content.json из кода
 
@@ -402,6 +406,11 @@ def at(tree, dotted):
     return cur
 
 
+def lead_count(text):
+    """Сколько пустых строк в начале текста — это вёрстка, а не украшение."""
+    return len(text) - len(text.lstrip("\n"))
+
+
 flattened = []
 for group in ("texts", "buttons", "words", "catalog"):
     for rel in string_paths(content.DEFAULTS[group]):
@@ -409,12 +418,59 @@ for group in ("texts", "buttons", "words", "catalog"):
         base, value = at(content.DEFAULTS, path), at(flat, path)
         if not isinstance(base, str) or not isinstance(value, str):
             continue
-        lead_base = len(base) - len(base.lstrip("\n"))
-        lead_value = len(value) - len(value.lstrip("\n"))
-        if lead_base and lead_value != lead_base:
-            flattened.append(f"{path}: ведущих пустых строк {lead_value} вместо {lead_base}")
+        if lead_count(base) and lead_count(value) != lead_count(base):
+            flattened.append(f"{path}: ведущих пустых строк {lead_count(value)} "
+                             f"вместо {lead_count(base)}")
 check("ни один текст не потерял ведущие пустые строки", not flattened,
       "; ".join(flattened[:4]))
+
+# Тот же признак проверяем дальше по цепочке: файл → оверлей → подстановка
+# переменных → резка на сообщения. На каждом шаге пустая строка в начале может
+# исчезнуть, и в чате текст прилипнет к предыдущему сообщению.
+eaten = []
+for rel in string_paths(content.DEFAULTS["texts"]):
+    path = f"texts.{rel}"
+    value = at(flat, path)
+    if not isinstance(value, str) or not lead_count(value):
+        continue
+    loaded = content.get(path) or ""
+    if lead_count(loaded) != lead_count(value):
+        eaten.append(f"{path}: оверлей отдал {lead_count(loaded)} строк вместо "
+                     f"{lead_count(value)}")
+    rendered = render(path)
+    if lead_count(rendered) != lead_count(value):
+        eaten.append(f"{path}: после подстановки {lead_count(rendered)} вместо "
+                     f"{lead_count(value)}")
+check("оверлей и подстановка сохраняют ведущие пустые строки", not eaten,
+      "; ".join(eaten[:3]))
+
+mangled = []
+for rel in string_paths(content.DEFAULTS["texts"]):
+    text = render(f"texts.{rel}")
+    if len(text) <= optimizer.TEXT_CHUNK:
+        continue
+    lead = lead_count(text)
+    parts = optimizer.chunk(text)
+    budget = optimizer.TEXT_CHUNK - lead
+    if any(not p for p in parts):
+        mangled.append(f"texts.{rel}: резка отдала пустое сообщение")
+    if any(len(p) > optimizer.TEXT_CHUNK for p in parts):
+        mangled.append(f"texts.{rel}: часть длиннее лимита MAX")
+    if lead and lead_count(parts[0]) != lead:
+        mangled.append(f"texts.{rel}: резка съела {lead} ведущих пустых строк")
+    if all(len(b) <= budget for b in text[lead:].split("\n\n")) and \
+            "\n\n".join(parts) != text:
+        mangled.append(f"texts.{rel}: резка переставила абзацы")
+check("резка длинных сообщений сохраняет пустые строки и порядок абзацев",
+      not mangled, "; ".join(mangled[:3]))
+
+# Отдельно на синтетическом тексте: в боевом файле длинных сообщений с ведущей
+# пустой строкой сейчас нет, а сломать резку легче всего именно на них.
+long_lead = optimizer.chunk("\n\n" + "абзац " * 300)
+check("резка текста длиннее лимита оставляет ведущую пустую строку",
+      long_lead and lead_count(long_lead[0]) == 2
+      and all(p and len(p) <= optimizer.TEXT_CHUNK for p in long_lead),
+      f"частей {len(long_lead)}, начало {long_lead[0][:8]!r}")
 
 print(f"\n{sum(results)}/{len(results)} проверок пройдено")
 sys.exit(0 if all(results) else 1)

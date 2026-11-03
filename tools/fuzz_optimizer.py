@@ -31,8 +31,10 @@ def shape_problems(messages):
     problems = []
     for message in messages:
         text = message.get("text") or ""
-        if len(text) > opt.TEXT_CHUNK + 40:
+        if len(text) > opt.TEXT_CHUNK:
             problems.append(f"сообщение {len(text)} символов — резка не сработала")
+        if text and not text.strip():
+            problems.append("ушло сообщение из одних пробелов")
         for tag in ("b", "i"):
             if text.count(f"<{tag}>") != text.count(f"</{tag}>"):
                 problems.append(f"незакрытый <{tag}> в «{text[:40]}»")
@@ -101,19 +103,48 @@ def sweep():
     return problems
 
 
+def blank_lines(rng, rounds=400):
+    """Резка не имеет права трогать вёрстку: ведущие пустые строки, целые абзацы
+    и лимит сообщения. Случайные тексты ловят границы, которых нет в файле."""
+    problems = []
+    for _ in range(rounds):
+        lead = "\n" * rng.randint(0, 3)
+        blocks = ["".join(rng.choice("абвгде .,!-") for _ in range(rng.randint(1, 1400))).strip()
+                  for _ in range(rng.randint(1, 6))]
+        text = lead + "\n\n".join(b if b else "х" for b in blocks)
+        parts = opt.chunk(text)
+        if not parts:
+            problems.append(f"резка отдала пустой список для текста {len(text)}")
+            continue
+        if any(not p for p in parts):
+            problems.append("резка отдала пустое сообщение")
+        if any(len(p) > opt.TEXT_CHUNK for p in parts):
+            problems.append(f"часть {max(len(p) for p in parts)} символов — "
+                            f"лимит {opt.TEXT_CHUNK}")
+        if len(lead) and (len(parts[0]) - len(parts[0].lstrip("\n"))) != len(lead):
+            problems.append(f"резка съела ведущие пустые строки ({len(lead)})")
+        budget = opt.TEXT_CHUNK - len(lead)
+        if all(len(b) <= budget for b in text[len(lead):].split("\n\n")) and \
+                "\n\n".join(parts) != text:
+            problems.append("резка переставила или потеряла абзацы")
+    return problems
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--runs", type=int, default=600)
     parser.add_argument("--seed", type=int, default=7)
     args = parser.parse_args()
 
-    problems = fuzz(args.runs, random.Random(args.seed)) + sweep()
+    rng = random.Random(args.seed)
+    problems = (fuzz(args.runs, rng) + sweep() + blank_lines(rng))
     print(f"фаззинг: {args.runs} прогонов · сфер в обходе: {len(opt.SPHERES)}")
     if problems:
         for problem in problems[:10]:
             print("❌", problem)
         return 1
-    print("✅ исключений нет, клавиатуры в порядке, все сферы доходят до rollout")
+    print("✅ исключений нет, клавиатуры в порядке, все сферы доходят до rollout, "
+          "резка бережёт пустые строки")
     return 0
 
 

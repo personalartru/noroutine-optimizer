@@ -205,15 +205,23 @@ GitHub: бот так же подхватит прежнее содержимо�
 перевод строки сразу за открывающим тегом, и правка молча срезала бы пустую
 строку во всех полях открытой вкладки.
 
+Цепочку проверяют по звеньям: `check_content.py` сравнивает пустые строки файла
+с кодом, потом с тем, что отдаёт оверлей и рендер с подстановками, и с результатом
+резки `optimizer.chunk()`; `check_max_bot.py` сверяет текст, ушедший в заглушку
+MAX, с тем, что отрендерил код, и ловит склейку «дисклеймер + призыв» в одну
+строку; `fuzz_optimizer.py` прогоняет те же инварианты резки на случайных текстах
+(ведущие строки, лимит сообщения, порядок абзацев). `optimizer.chunk()` при этом
+режет остаток лимита, а не весь лимит: ведущие строки тоже считаются.
+
 ## Проверки перед push
 
 ```bash
 python3 tools/dump_content.py --check          # content.json и content.schema.json не отстали от кода
-python3 tools/check_content.py                 # 64 проверки оверлея: подстановки, служебные поля, мёртвые ключи
+python3 tools/check_content.py                 # 67 проверок оверлея: подстановки, служебные поля, мёртвые ключи, пустые строки вёрстки
 python3 tools/simulate_optimizer.py --quiet    # 6 сценариев + инварианты клавиатур, optimizer-preview.html
 python3 tools/simulate_optimizer.py --overlay --quiet --no-preview   # правка из админки видна, цифры и payload'ы — нет
-python3 tools/check_max_bot.py                 # 67 интеграционных проверок с заглушкой MAX API
-python3 tools/fuzz_optimizer.py --runs 800     # случайные payload'ы и тексты + обход всех сфер
+python3 tools/check_max_bot.py                 # 71 интеграционная проверка с заглушкой MAX API
+python3 tools/fuzz_optimizer.py --runs 800     # случайные payload'ы и тексты + обход всех сфер + инварианты резки
 python3 tools/make_report_pdf.py               # отчёты реальны: собирает PDF по тем же сценариям
 ```
 

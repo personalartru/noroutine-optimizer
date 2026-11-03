@@ -606,5 +606,31 @@ optimizer.refresh_catalog()
 results.append(check("после съёма оверлея возвращаемся к боевому файлу",
                      content.text("intro") != MARKER and content.warnings() == []))
 
+# Вёрстка пустыми строками: она отделяет строку бюджета от «Сопровождение:»,
+# а дисклеймер — от призыва отправить заявку. Теряется на любом из шагов
+# (файл → оверлей → подстановка → резка), и в чате получается склеенная строка.
+del SENT[:]
+final = run_flow(USER2)
+delivered = texts_to(DIALOG2)
+support_label = (content.get("texts.rollout.support") or "").split("{")[0]
+disclaimer = content.text("rollout.disclaimer").rstrip()
+cta = content.text("rollout.cta").lstrip("\n")
+results.append(check("строка сопровождения начинается с пустой строки",
+                     bool(support_label.startswith("\n"))
+                     and any(t for t in delivered if support_label in t),
+                     repr(support_label[:24])))
+results.append(check("дисклеймер и призыв разделены пустой строкой",
+                     any(f"{disclaimer}\n\n{cta}" in t for t in delivered)))
+results.append(check("в доставленных текстах нет склеенных строк",
+                     not any(disclaimer + cta in t for t in delivered),
+                     next((t[:60] for t in delivered if disclaimer + cta in t), "")))
+# То, что отрендерил код, должно прийти в MAX байт в байт.
+from_rollout = []
+for part in optimizer.text_rollout(final.get("sav") or {}):
+    from_rollout.extend(optimizer.chunk(part))
+lost = [p[:46] for p in from_rollout if p not in delivered]
+results.append(check("финальные тексты уходят целиком, с пустыми строками",
+                     bool(from_rollout) and not lost, "; ".join(lost[:2])))
+
 print(f"\n{sum(results)}/{len(results)} проверок пройдено")
 sys.exit(0 if all(results) else 1)

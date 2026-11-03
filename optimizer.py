@@ -147,23 +147,31 @@ def chunk(text, size=TEXT_CHUNK):
     """Резка длинного текста по абзацам, чтобы не упереться в лимит сообщения."""
     if len(text) <= size:
         return [text]
+    # Ведущие пустые строки — часть вёрстки: они отделяют этот текст от
+    # предыдущего сообщения. Разбивка идёт по "\n\n", и блок из одних переводов
+    # строк выпал бы как пустой абзац, поэтому их снимаем, режем остаток по
+    # остатку лимита и возвращаем их на место.
+    lead = text[:len(text) - len(text.lstrip("\n"))]
+    budget = size - len(lead)
     parts = []
     current = ""
-    for block in text.split("\n\n"):
+    for block in text[len(lead):].split("\n\n"):
         candidate = f"{current}\n\n{block}" if current else block
-        if len(candidate) <= size:
+        if len(candidate) <= budget:
             current = candidate
             continue
         if current:
             parts.append(current)
-        while len(block) > size:
-            cut = block.rfind("\n", 0, size)
-            cut = cut if cut > size // 2 else size
+        while len(block) > budget:
+            cut = block.rfind("\n", 0, budget)
+            cut = cut if cut > budget // 2 else budget
             parts.append(block[:cut].rstrip())
             block = block[cut:].lstrip()
         current = block
     if current:
         parts.append(current)
+    if lead and parts:
+        parts[0] = lead + parts[0]
     return parts
 
 
