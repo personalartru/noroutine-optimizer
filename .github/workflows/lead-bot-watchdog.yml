@@ -1,0 +1,118 @@
+name: Optimizer watchdog
+
+# Страховка для цепочки самопереочередей в run-optimizer.yml.
+#
+# Основной признак живости — состояние очереди, а не возраст последнего
+# прогона: прогон push мог быть создан 5 минут назад и тут же отменён, и по
+# возрасту цепочка выглядела бы живой. Если ни один цикл не опрашивает и в
+# очереди нет актуального стоящего — ставим новый. Отдельный случай:
+# queued-прогон стоит без движения дольше STUCK_MIN, значит завис — его тоже
+# вытесняем. После dispatch проверяем, что прогон действительно встал.
+#
+# В группу optimizer-v1 сторож не входит и слот не занимает. Планировщик
+# GitHub при нагрузке пропускает cron-запуски, поэтому сторож — страховка от
+# «цепочка встала», а не способ её гонять.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lead-bot-watchdog.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Проверить очередь и оживить цепочку, если она встала
+        id: check
+        env:
+          # PAT: запущенный им прогон продолжит цепочку сам. GITHUB_TOKEN как
+          # запасной вариант — dispatch он поставить может.
+          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN || secrets.GITHUB_TOKEN }}
+          # Уведомление в Telegram работает, если добавить в этот репозиторий
+          # секреты LEAD_BOT_TOKEN и LEAD_ADMIN_CHAT_ID; без них тихо молчит.
+          TELEGRAM_BOT_TOKEN: ${{ secrets.LEAD_BOT_TOKEN }}
+          LEAD_ADMIN_CHAT_ID: ${{ secrets.LEAD_ADMIN_CHAT_ID }}
+          WORKFLOW: "Run optimizer bot (GitHub Actions)"
+          REPO: personalartru/noroutine-optimizer
+          STUCK_MIN: "45"
+        run: |
+          set -euo pipefail
+
+          gh run list --repo "$REPO" --workflow "$WORKFLOW" --limit 20 \
+            --json status,updatedAt > /tmp/runs.json
+          # running — циклы, которые сейчас опрашивают; busy — они же плюс
+          # стоящие в очереди; age — минуты с самой свежей отметки updatedAt
+          # (у идущего цикла она обновляется, у зависшего в очереди — нет).
+          python3 - > /tmp/state.txt <<'PY'
+          import datetime, json
+          runs = json.load(open("/tmp/runs.json"))
+          waiting = {"queued", "pending", "waiting", "requested"}
+          now = datetime.datetime.now(datetime.timezone.utc)
+          def age_of(stamp):
+              d = datetime.datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ")
+              return int((now - d.replace(tzinfo=datetime.timezone.utc)).total_seconds() // 60)
+          running = sum(1 for r in runs if r["status"] == "in_progress")
+          busy = running + sum(1 for r in runs if r["status"] in waiting)
+          age = min((age_of(r["updatedAt"]) for r in runs), default=9999)
+          print(running, busy, age)
+          PY
+          read -r running busy age < /tmp/state.txt
+          echo "В работе: $running, в очереди: $busy, последняя отметка: $age мин назад"
+
+          notify() {
+            if [[ -n "${TELEGRAM_BOT_TOKEN:-}" && -n "${LEAD_ADMIN_CHAT_ID:-}" ]]; then
+              curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+                --data-urlencode "chat_id=${LEAD_ADMIN_CHAT_ID}" \
+                --data-urlencode "text=$1" >/dev/null || true
+            fi
+          }
+
+          if (( running > 0 )); then
+            echo "Цикл опрашивает — новый прогон не нужен"
+            echo "restarted=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if (( busy > 0 )) && (( age <= STUCK_MIN )); then
+            echo "Слот занят прогоном в очереди, он и опросит свежий main"
+            echo "restarted=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if (( busy > 0 )); then
+            reason="queued-прогон завис: в очереди $busy, тишина $age мин"
+          else
+            reason="цепочка встала: очередь пуста, тишина $age мин"
+          fi
+          echo "$reason — ставлю новый цикл"
+          notify "Сторож оптимизатора: $reason. Ставлю новый цикл."
+          # minutes не передаём: прогон берёт дефолт из workflow.
+          for attempt in 1 2 3; do
+            if gh workflow run "$WORKFLOW" --repo "$REPO" --ref main; then
+              sleep 10
+              after=$(gh run list --repo "$REPO" --workflow "$WORKFLOW" --limit 10 \
+                        --json status --jq '[.[] | select(.status == "queued"
+                          or .status == "pending" or .status == "waiting"
+                          or .status == "requested" or .status == "in_progress")]
+                        | length')
+              if (( after > 0 )); then
+                echo "Цепочка восстановлена (попытка $attempt, прогонов в работе/очереди: $after)"
+                echo "restarted=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            fi
+            echo "::warning::попытка $attempt: цикл не встал в очередь"
+          done
+          echo "::error::не удалось оживить цепочку за 3 попытки — нужен ручной gh workflow run \"$WORKFLOW\" --repo $REPO"
+          notify "Сторож оптимизатора: не смог поставить цикл за 3 попытки. Вручную: gh workflow run \"$WORKFLOW\" --repo $REPO"
+          echo "restarted=false" >> "$GITHUB_OUTPUT"
+          exit 1

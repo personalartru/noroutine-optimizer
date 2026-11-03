@@ -1,0 +1,155 @@
+name: Run optimizer bot (GitHub Actions)
+
+# Один цикл = ~9 минут long polling, затем шаг переочереди ставит следующий
+# прогон. Push в main по коду бота тоже запускает цикл — свежий код попадает в
+# прод сам, отдельный деплой не нужен.
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "Сколько минут работать (максимум 20, чтобы не упереться в лимит)"
+        required: false
+        default: "9"
+        type: string
+  push:
+    branches: [main]
+    paths:
+      - "optimizer.py"
+      - "max_bot.py"
+      - "requirements.txt"
+      - ".github/workflows/run-optimizer.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  optimizer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      # Имя группы меняем при смене схемы очереди: отменённый прогон в очереди
+      # иногда оставляет группу зависшей. cancel-in-progress: false — идущий
+      # цикл не прерывается, но группа держит ровно одного стоящего: новое
+      # поступление вытесняет предыдущий queued. Поэтому шаг «Поставить в
+      # очередь следующий цикл» не встаёт, когда слот уже занят.
+      group: optimizer-v1
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Проверить секреты
+        id: probe
+        env:
+          MAX_BOT_TOKEN: ${{ secrets.MAX_BOT_TOKEN }}
+          DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$MAX_BOT_TOKEN" ]; then
+            echo "::error::MAX_BOT_TOKEN не задан — добавьте токен бота @se14730534_1_bot"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+          [ -n "$DISPATCH_TOKEN" ] || echo "::warning::DISPATCH_TOKEN не задан — цепочка самопереочередей работать не будет, циклы только по push или вручную"
+      - name: Сертификаты Минцифры (нужны для API MAX)
+        # gu-st.ru периодически обрывает соединение (curl 56). Одна такая осечка
+        # роняла цикл ещё до шага опроса: свежий код не доходил до прода до
+        # следующего круга. Ретраи + неловящий шаг, чтобы цепочка не вставала.
+        if: steps.probe.outputs.ready == 'true'
+        continue-on-error: true
+        env:
+          REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
+        run: |
+          fetch() { curl --fail --silent --show-error --location \
+                      --retry 4 --retry-delay 3 --retry-all-errors --max-time 25 \
+                      "$1" -o "$2"; }
+          { fetch https://gu-st.ru/content/lending/russian_trusted_root_ca_pem.crt /tmp/root.crt &&
+            fetch https://gu-st.ru/content/lending/russian_trusted_sub_ca_pem.crt /tmp/sub.crt &&
+            sudo cp /tmp/root.crt /usr/local/share/ca-certificates/russian_trusted_root_ca.crt &&
+            sudo cp /tmp/sub.crt /usr/local/share/ca-certificates/russian_trusted_sub_ca.crt &&
+            sudo update-ca-certificates; } ||
+            echo "::warning::Сертификаты Минцифры не забрал — цикл идёт на системном бандле"
+      - name: Восстановить состояние
+        if: steps.probe.outputs.ready == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .max_offset
+            .max_dialogs.json
+            .max_optimizer.json
+          key: optimizer-state-${{ github.run_id }}
+          restore-keys: optimizer-state-
+      - name: Опрашивать MAX
+        if: steps.probe.outputs.ready == 'true'
+        env:
+          MAX_BOT_TOKEN: ${{ secrets.MAX_BOT_TOKEN }}
+          # Ваш user_id в MAX: сюда приходят заявки с финального шага. Вы должны
+          # один раз запустить бота — MAX-бот пишет только запустившим его.
+          MAX_ADMIN_CHAT_ID: ${{ secrets.MAX_ADMIN_CHAT_ID || '60669315' }}
+          LEAD_BOT_URL: ${{ vars.LEAD_BOT_URL || 'https://max.ru/se14730534_bot' }}
+          BOT_RUN_MINUTES: ${{ inputs.minutes || '9' }}
+          REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
+        run: python max_bot.py --minutes "${{ inputs.minutes || '9' }}"
+      - name: Сохранить состояние
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .max_offset
+            .max_dialogs.json
+            .max_optimizer.json
+          key: optimizer-state-${{ github.run_id }}
+      - name: Поставить в очередь следующий цикл
+        if: always() && steps.probe.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+          WF: "Run optimizer bot (GitHub Actions)"
+          # Без checkout gh вывел бы репозиторий из git-контекста; путь явно —
+          # чтобы шаг не падал, если меняется состав steps.
+          REPO: personalartru/noroutine-optimizer
+        run: |
+          set -u
+          queued() {
+            gh run list --repo "$REPO" --workflow "$WF" --limit 10 --json status \
+              --jq '[.[] | select(.status == "queued" or .status == "pending"
+                                 or .status == "waiting" or .status == "requested")]
+                    | length' 2>/dev/null || echo 0
+          }
+          if [ -z "$GH_TOKEN" ]; then
+            echo "DISPATCH_TOKEN не задан — следующий цикл не запущен"
+            exit 0
+          fi
+          # minutes не передаём: новый прогон берёт дефолт из workflow,
+          # иначе старое значение тащится по всей цепочке.
+          #
+          # Слот группы держит одного стоящего: если поставить свой прогон
+          # поверх queued-прогона push, GitHub отменит того, а его прогон и так
+          # опросил бы свежий main.
+          busy=$(queued)
+          if [ "${busy:-0}" -gt 0 ]; then
+            echo "В очереди уже стоит прогонов: $busy — свой не ставим, чтобы их не отменили"
+            exit 0
+          fi
+          # Dispatch может провалиться молча (не стало слота, сбой API) — тогда
+          # цепочка умирает и бот молчит до ручного запуска. Проверяем результат
+          # и досылаем, максимум три попытки.
+          for attempt in 1 2 3; do
+            if ! gh workflow run "$WF" --repo "$REPO" --ref "${{ github.ref_name }}"; then
+              echo "::warning::попытка $attempt: gh workflow run вернул ошибку"
+            fi
+            sleep 15
+            busy=$(queued)
+            if [ "${busy:-0}" -gt 0 ]; then
+              echo "Следующий цикл в очереди (попытка $attempt, стоящих: $busy)"
+              exit 0
+            fi
+            echo "::warning::попытка $attempt: в очереди пусто, повторяем"
+          done
+          echo "::error::не удалось поставить следующий цикл за 3 попытки: " \
+               "цепочка встанет до сторожа lead-bot-watchdog.yml. Вручную — gh workflow run «WF» --ref main"
+          # Падаем специально: мертвую цепочку видно в списке прогонов,
+          # а не только в чужом логе, который никто не открывает.
+          exit 1

@@ -1,0 +1,9 @@
+.venv/
+.env
+__pycache__/
+
+# Локальное состояние бота: чужие шаги диалога и переписка не коммитятся
+.max_offset
+.max_dialogs.json
+.max_optimizer.json
+optimizer-preview.html
