@@ -73,7 +73,28 @@ SCENARIOS = {
                    "opt:o:ok", "opt:t:ok", "opt:t:back", "opt:reset"],
         "text": ["не число", "сорок два", "отмена"],
     },
+    "typed": {
+        "title": "Команда: количество набрано сообщением, без кнопки «Своё число»",
+        "clicks": ["opt:s:it", "opt:m:team", "opt:r:0", "opt:r:1", "opt:r:ok",
+                   "opt:o:ticket", "opt:o:ok", "opt:t:chat", "opt:t:ok",
+                   "opt:t:plan", "opt:fb"],
+        "text": ["8", "4", "Поддержка продукта, 12 человек в контуре. "
+                 "support@company.ru"],
+    },
 }
+
+
+# Клик уместнее текста, если он про текущий шаг: иначе сценарий с цифрами,
+# набранными сообщением, съедал текст заявки раньше времени, а сценарий «team»
+# терял клик «opt:c:8».
+STEP_KIND = {"sphere": "s", "mode": "m", "role": "r", "count": "c",
+             "count_text": "c", "ops": "o", "tool": "t", "feedback": "fb"}
+
+
+def click_for_step(payload, step):
+    """«opt:c:8» про шаг количества? Сравниваем вид payload с шагом."""
+    parts = (payload or "").split(":")
+    return len(parts) > 1 and STEP_KIND.get(step) == parts[1]
 
 
 def render_buttons(buttons):
@@ -103,14 +124,19 @@ def play(name, script, verbose=True):
 
     clicks, texts = list(script["clicks"]), list(script["text"])
     for _ in range(200):
-        if opt.expects_text(session) and texts:
-            text = texts.pop(0)
-            push("user", text)
-            session, messages = opt.dispatch_text(text, session)
-        elif clicks:
+        # Кнопки сценария важнее текста, пока они про текущий шаг: иначе
+        # скрипт съедал текст заявки на первом же вопросе о количестве.
+        use_click = bool(clicks) and (
+            click_for_step(clicks[0], session.get("step"))
+            or not (opt.expects_text(session) and texts))
+        if use_click:
             payload = clicks.pop(0)
             push("user", f"нажал «{labels.get(payload, payload)}»", payload=payload)
             session, messages = opt.dispatch(payload, session)
+        elif texts:
+            text = texts.pop(0)
+            push("user", text)
+            session, messages = opt.dispatch_text(text, session)
         else:
             break
         for message in messages:
@@ -131,7 +157,7 @@ def play(name, script, verbose=True):
     return transcript, session
 
 
-HAPPY = ("solo", "team", "fire", "again")
+HAPPY = ("solo", "team", "fire", "again", "typed")
 FAILURE_PHRASES = ("не распознана", "нет в списке", "не понял", "Не понял",
                    "нужно число", "Нужно число", "Traceback")
 INTRO = opt.text_intro().splitlines()[0][:24]

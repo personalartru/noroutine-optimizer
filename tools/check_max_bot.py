@@ -186,6 +186,31 @@ results.append(check("первая роль осталась в команде",
                      any(r["label"].startswith("L1-поддержка") and r["count"] == 3
                          for r in sess.get("roles", [])), str(sess.get("roles"))))
 
+# 6b. Число сообщением прямо на шаге с кнопками 1–5: текст шага обещает
+# «или число сообщением», значит «Своё число» нажимать не обязательно.
+reset()
+for payload in ("opt:start", "opt:s:it", "opt:m:team", "opt:r:0", "opt:r:ok"):
+    click(payload)
+results.append(check("шаг — вопрос о количестве с кнопками",
+                     (session_of() or {}).get("step") == "count",
+                     str((session_of() or {}).get("step"))))
+max_bot.handle_text(USER, DIALOG, "Павел", "personartru", "2")
+sess = session_of() or {}
+results.append(check("число с клавиатуры принято без «Своё число»",
+                     (sess.get("last_role") or "").endswith("× 2"), str(sess)))
+results.append(check("после количества шаг уехал с «count»",
+                     sess.get("step") != "count", str(sess.get("step"))))
+results.append(check("напечатанная цифра не стала заявкой",
+                     not messages_to(ADMIN)))
+reset()
+for payload in ("opt:start", "opt:s:it", "opt:m:team", "opt:r:0", "opt:r:ok"):
+    click(payload)
+max_bot.handle_text(USER, DIALOG, "Павел", "personartru", "пару человек")
+results.append(check("текст без цифры оставляет на шаге количества",
+                     (session_of() or {}).get("step") == "count"))
+results.append(check("текст без цифры получает внятную подсказку",
+                     any("Нужно число" in t for t in texts_to())))
+
 # 7. Отмена и перезапуск
 reset()
 click("opt:start")

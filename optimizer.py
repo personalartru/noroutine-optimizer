@@ -387,8 +387,13 @@ def is_expired(session, now=None):
 
 
 def expects_text(session):
-    """Шаги, где ждём свободный текст: своё число и текст заявки."""
-    return bool(session) and session.get("step") in ("count_text", "feedback")
+    """Шаги, где ждём свободный текст: количество и текст заявки.
+
+    «count» — сам вопрос о количестве с кнопками 1–5: в его тексте обещано
+    «или число сообщением», значит цифра сообщением должна работать сразу, без
+    предварительного нажатия «Своё число» (шаг «count_text»).
+    """
+    return bool(session) and session.get("step") in ("count", "count_text", "feedback")
 
 
 def headcount(session):
@@ -1012,14 +1017,15 @@ def dispatch_text(text, session):
     session["updated"] = time.time()
     step = session.get("step")
 
-    if step == "count_text":
+    if step in ("count", "count_text"):
         role = session.get("pending_role")
         if not role:
             # состояние пришло без роли — возвращаем к выбору специальности
             return to_ops(session) if session.get("roles") else start(session)
         match = re.search(r"\d+", text or "")
         if not match:
-            return session, emit("Нужно число — например «7» или «примерно 12».")
+            return session, emit("Нужно число — например «7» или «примерно 12». "
+                                 "Кнопки 1–5 тоже работают.")
         record_role(session, role["label"], int(match.group()), role["rate"])
         session["pending_role"] = None
         return ask_count(session)
