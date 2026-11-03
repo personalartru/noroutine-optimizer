@@ -31,9 +31,9 @@ import optimizer  # noqa: E402
 SENT = []
 
 
-def fake_call(method, path, query=None, body=None):
+def fake_call(method, path, query=None, body=None, token=None):
     SENT.append({"method": method, "path": path, "query": query or {},
-                 "body": body or {}})
+                 "body": body or {}, "token": token or max_bot.TOKEN})
     if path == "me":
         return {"username": "se14730534_1_bot", "name": "Оптимизатор"}
     return {"ok": True}
@@ -275,6 +275,54 @@ all_text = "\n".join(texts_to()) + json.dumps(SENT, ensure_ascii=False)
 results.append(check("в текстах нет имени владельца", "Павлу" not in all_text))
 results.append(check("нет ссылки на калькулятор сайта",
                      "калькуляторе на сайте" not in all_text))
+
+# 12b. Куда уходит заявка: чат лид-бота → свой диалог → очередь повторов
+saved_lead = (max_bot.LEAD_BOT_TOKEN, max_bot.LEAD_ADMIN_CHAT_ID)
+reset()
+max_bot.LEAD_BOT_TOKEN, max_bot.LEAD_ADMIN_CHAT_ID = "lead-token", "999"
+ok = max_bot.send_admin_lead("📩 Расчёт из «Оптимизатора»\nтест")
+results.append(check("с LEAD_MAX_BOT_TOKEN заявка идёт его токеном в чат лид-бота",
+                     ok and len(SENT) == 1
+                     and SENT[0]["query"].get("chat_id") == "999"
+                     and SENT[0]["token"] == "lead-token"))
+
+# без токена лид-бота — в запомненный диалог владельца, а не на голый user_id
+max_bot.LEAD_BOT_TOKEN, max_bot.LEAD_ADMIN_CHAT_ID = "", ""
+json.dump({"999": "583859747"}, open(os.environ["MAX_DIALOGS_FILE"], "w"))
+reset()
+ok = max_bot.send_admin_lead("заявка в свой диалог")
+chats = [s["query"].get("chat_id") for s in SENT if s["path"] == "messages"]
+results.append(check("без него пишет в диалог владельца, а не на user_id (404 fix)",
+                     ok and chats == ["583859747"]))
+
+# все маршруты умерли — текст не теряется, а ждёт повтора
+real_call = max_bot.call
+
+
+def dead_call(method, path, query=None, body=None, token=None):
+    raise RuntimeError("POST messages: HTTP 404 {\"code\":\"chat.not.found\"}")
+
+
+max_bot.call = dead_call
+reset()
+ok = max_bot.send_admin_lead("утраченная заявка")
+pending_path = max_bot.ADMIN_PENDING_FILE
+queued = (json.load(open(pending_path, encoding="utf-8")).get("leads")
+          if os.path.exists(pending_path) else [])
+results.append(check("недоотправленная заявка легла в очередь повторов",
+                     not ok and queued == ["утраченная заявка"]))
+
+# канал ожил — цикл довозит её сам и очищает файл
+max_bot.call = fake_call
+reset()
+delivered = max_bot.flush_admin_leads()
+flushed = [s for s in SENT if s["path"] == "messages"]
+results.append(check("при старте следующего круга очередь довозится и очищается",
+                     delivered == 1 and len(flushed) == 1
+                     and "утраченная заявка" in flushed[0]["body"]["text"]
+                     and not os.path.exists(pending_path)))
+max_bot.call = real_call
+max_bot.LEAD_BOT_TOKEN, max_bot.LEAD_ADMIN_CHAT_ID = saved_lead
 
 # 13. Запуск без токена честно говорит о проблеме, а не крутит пустой цикл
 saved, max_bot.TOKEN = max_bot.TOKEN, ""

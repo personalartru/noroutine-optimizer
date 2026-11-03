@@ -46,6 +46,7 @@ jobs:
         env:
           MAX_BOT_TOKEN: ${{ secrets.MAX_BOT_TOKEN }}
           DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+          LEAD_MAX_BOT_TOKEN: ${{ secrets.LEAD_MAX_BOT_TOKEN }}
         run: |
           if [ -z "$MAX_BOT_TOKEN" ]; then
             echo "::error::MAX_BOT_TOKEN не задан — добавьте токен бота @se14730534_1_bot"
@@ -54,6 +55,7 @@ jobs:
           fi
           echo "ready=true" >> "$GITHUB_OUTPUT"
           [ -n "$DISPATCH_TOKEN" ] || echo "::warning::DISPATCH_TOKEN не задан — цепочка самопереочередей работать не будет, циклы только по push или вручную"
+          [ -n "$LEAD_MAX_BOT_TOKEN" ] || echo "::warning::LEAD_MAX_BOT_TOKEN не задан — заявки пойдут в диалог с @se14730534_1_bot, а не в чат лид-бота @se14730534_bot"
       - name: Сертификаты Минцифры (нужны для API MAX)
         # gu-st.ru периодически обрывает соединение (curl 56). Одна такая осечка
         # роняла цикл ещё до шага опроса: свежий код не доходил до прода до
@@ -80,6 +82,7 @@ jobs:
             .max_offset
             .max_dialogs.json
             .max_optimizer.json
+            .max_admin_pending.json
           key: optimizer-state-${{ github.run_id }}
           restore-keys: optimizer-state-
       - name: Опрашивать MAX
@@ -89,6 +92,10 @@ jobs:
           # Ваш user_id в MAX: сюда приходят заявки с финального шага. Вы должны
           # один раз запустить бота — MAX-бот пишет только запустившим его.
           MAX_ADMIN_CHAT_ID: ${{ secrets.MAX_ADMIN_CHAT_ID || '60669315' }}
+          # Токен старого лид-бота @se14730534_bot: заявка уходит в тот диалог,
+          # где вы уже читаете лиды. Без него — в собственный диалог «Оптимизатора».
+          LEAD_MAX_BOT_TOKEN: ${{ secrets.LEAD_MAX_BOT_TOKEN }}
+          LEAD_MAX_ADMIN_CHAT_ID: ${{ secrets.LEAD_MAX_ADMIN_CHAT_ID || '60669315' }}
           MAX_CHANNEL_URL: ${{ vars.MAX_CHANNEL_URL || 'https://max.ru/channel_noroutine' }}
           BOT_RUN_MINUTES: ${{ inputs.minutes || '9' }}
           REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
@@ -103,6 +110,7 @@ jobs:
             .max_offset
             .max_dialogs.json
             .max_optimizer.json
+            .max_admin_pending.json
           key: optimizer-state-${{ github.run_id }}
       - name: Поставить в очередь следующий цикл
         if: always() && steps.probe.outputs.ready == 'true'

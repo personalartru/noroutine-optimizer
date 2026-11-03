@@ -7,3 +7,4 @@ __pycache__/
 .max_dialogs.json
 .max_optimizer.json
 optimizer-preview.html
+.max_admin_pending.json

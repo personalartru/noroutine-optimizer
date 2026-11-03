@@ -8,6 +8,10 @@
   тогда отвечаем на callback, и клик не теряется;
 - chat_id диалога НЕ равен user_id: писать нужно на chat_id из события,
   иначе 404 chat.not.found — соответствие помним в .max_dialogs.json;
+- заявка с финального шага уходит в диалог старого лид-бота @se14730534_bot
+  (секрет LEAD_MAX_BOT_TOKEN), где владелец уже читает лиды; если токена нет —
+  в собственный диалог с владельцем; если не дошла — ждёт повтора в
+  .max_admin_pending.json;
 - каждое сообщение режется по 900 символов (см. optimizer.TEXT_CHUNK).
 
 Запуск: python max_bot.py [--minutes N]
@@ -26,10 +30,19 @@ MAX_API = os.environ.get("MAX_API_BASE", "https://platform-api2.max.ru")
 # main() честно скажет об этом и не станет молча крутить цикл.
 TOKEN = os.environ.get("MAX_BOT_TOKEN", "")
 ADMIN_CHAT_ID = os.environ.get("MAX_ADMIN_CHAT_ID", "")
+# Заявка должна приходить туда, где владелец уже читает лиды, — в диалог со
+# старым лид-ботом @se14730534_bot. Его токен — отдельный секрет
+# LEAD_MAX_BOT_TOKEN; без него пишем в собственный диалог «Оптимизатора».
+LEAD_BOT_TOKEN = os.environ.get("LEAD_MAX_BOT_TOKEN", "")
+LEAD_ADMIN_CHAT_ID = os.environ.get("LEAD_MAX_ADMIN_CHAT_ID", "") or ADMIN_CHAT_ID
+ADMIN_DIALOG_ID = os.environ.get("MAX_ADMIN_DIALOG_ID", "")
 RUN_MINUTES = float(os.environ.get("BOT_RUN_MINUTES", "9") or 9)
 OFFSET_FILE = os.environ.get("MAX_OFFSET_FILE", ".max_offset")
 DIALOGS_FILE = os.environ.get("MAX_DIALOGS_FILE", ".max_dialogs.json")
 SESSIONS_FILE = os.environ.get("MAX_OPTIMIZER_FILE", ".max_optimizer.json")
+# Недоставленные заявки: без них текст теряется вместе с упавшим запросом.
+ADMIN_PENDING_FILE = os.environ.get("MAX_ADMIN_PENDING_FILE", ".max_admin_pending.json")
+ADMIN_PENDING_MAX = 50
 BOT_USERNAME = os.environ.get("MAX_BOT_USERNAME", "")
 
 TEXT_UNKNOWN = (
@@ -46,14 +59,15 @@ def btn(text, payload):
 
 
 # ── API ──────────────────────────────────────────────────────────────────────
-def call(method, path, query=None, body=None):
-    if not TOKEN:
+def call(method, path, query=None, body=None, token=None):
+    key = token or TOKEN
+    if not key:
         raise RuntimeError(TEXT_NO_TOKEN)
     r = requests.request(
         method,
         f"{MAX_API}/{path}",
         params=query,
-        headers={"Authorization": TOKEN, "Content-Type": "application/json"},
+        headers={"Authorization": key, "Content-Type": "application/json"},
         json=body,
         timeout=90,
     )
@@ -113,11 +127,86 @@ def answer_callback(callback_id, text):
         return False
 
 
+def admin_routes():
+    """Куда слать заявку, в порядке предпочтения.
+
+    1. Диалог старого лид-бота @se14730534_bot (токен из `LEAD_MAX_BOT_TOKEN`) —
+       там владелец уже читает заявки, поэтому это основной путь;
+    2. собственный диалог «Оптимизатора» с владельцем — chat_id из события
+       (`chat_id` диалога НЕ равен `user_id`, иначе 404 chat.not.found);
+    3. голый `user_id` владельца — последняя попытка, когда диалог ещё не
+       запомнен (кэш состояния пуст).
+    """
+    routes = []
+    if LEAD_BOT_TOKEN and LEAD_ADMIN_CHAT_ID:
+        routes.append((LEAD_BOT_TOKEN, LEAD_ADMIN_CHAT_ID, "лид-бот @se14730534_bot"))
+    dialog = ADMIN_DIALOG_ID or (dialog_for(ADMIN_CHAT_ID) if ADMIN_CHAT_ID else None)
+    if dialog:
+        routes.append((TOKEN, dialog, f"свой диалог {dialog}"))
+    if ADMIN_CHAT_ID and ADMIN_CHAT_ID != dialog:
+        routes.append((TOKEN, ADMIN_CHAT_ID, f"user_id {ADMIN_CHAT_ID}"))
+    return routes
+
+
+def queue_admin_lead(text):
+    """Заявку не теряем: кладём в файл и пробуем довезти в следующем цикле."""
+    pending = load_json(ADMIN_PENDING_FILE)
+    items = pending.get("leads") or []
+    items.append(text)
+    pending["leads"] = items[-ADMIN_PENDING_MAX:]
+    save_json(ADMIN_PENDING_FILE, pending)
+    print(f"Заявка не доставлена — сохранил для повтора "
+          f"(в очереди: {len(pending['leads'])})")
+
+
+def send_admin_lead(text):
+    routes = admin_routes()
+    if not routes:
+        print("::warning::некуда слать заявку: нет LEAD_MAX_BOT_TOKEN "
+              "и MAX_ADMIN_CHAT_ID — текст только в очереди на повтор")
+        queue_admin_lead(text)
+        return False
+    for token, chat_id, label in routes:
+        try:
+            call("POST", "messages", query={"chat_id": chat_id},
+                 body={"text": text, "format": "html", "notify": True},
+                 token=token)
+            print(f"Заявка отправлена владельцу -> {label}")
+            return True
+        except RuntimeError as e:
+            print(f"Заявка не прошла через {label}: {e}")
+    queue_admin_lead(text)
+    return False
+
+
+def flush_admin_leads():
+    """Повтор недоставленных заявок — при каждом проходе цикла."""
+    pending = load_json(ADMIN_PENDING_FILE)
+    items = pending.get("leads") or []
+    if not items:
+        return 0
+    remaining = []
+    sent = 0
+    for text in items:
+        if send_admin_lead(text):
+            sent += 1
+        else:
+            remaining.append(text)
+            break  # канал недоступен — остальное повтим на следующем круге
+    if remaining:
+        save_json(ADMIN_PENDING_FILE, {"leads": remaining})
+    else:
+        try:
+            os.remove(ADMIN_PENDING_FILE)
+        except OSError:
+            save_json(ADMIN_PENDING_FILE, {"leads": []})
+    if sent:
+        print(f"Довёз заявок из очереди: {sent}, осталось: {len(remaining)}")
+    return sent
+
+
 def notify_admin(user_id, name, request, username, session):
     """Заявка с финального шага: текст пользователя плюс его же расчёт."""
-    if not ADMIN_CHAT_ID:
-        print("MAX_ADMIN_CHAT_ID не задан — заявка только в лог")
-        return False
     calc = session.get("calc") or {}
     who = name or "без имени"
     if username:
@@ -137,14 +226,7 @@ def notify_admin(user_id, name, request, username, session):
             summary += f" · инструменты: {tools}"
         lines += ["", f"[Оптимизатор] {summary}"]
     lines += ["", "Ответьте ему в личку MAX: откройте профиль и напишите."]
-    try:
-        call("POST", "messages", query={"chat_id": ADMIN_CHAT_ID},
-             body={"text": "\n".join(lines), "format": "html", "notify": True})
-        print("Заявка отправлена владельцу")
-        return True
-    except RuntimeError as e:
-        print("Не удалось переслать заявку:", e)
-        return False
+    return send_admin_lead("\n".join(lines))
 
 
 # ── Состояние ────────────────────────────────────────────────────────────────
@@ -390,9 +472,12 @@ def main():
     # Проверка токена до первого же обновления: на неверном ключе /me молчит,
     # и иначе цикл крутил бы 9 минут впустую.
     who = bot_username()
+    routes = admin_routes()
     print(f"аккаунт: @{who or 'не опознан — проверьте MAX_BOT_TOKEN'} · "
-          f"заявки: чат {ADMIN_CHAT_ID or 'не задан (только лог)'} · "
+          f"заявки: {routes[0][2] if routes else 'некуда слать (только очередь)'} · "
           f"кнопка на финале: {optimizer.CHANNEL_URL}")
+    flush_admin_leads()
+    next_flush = time.time() + 60
 
     while time.time() < deadline:
         try:
@@ -414,6 +499,11 @@ def main():
                 handle_event(event)
             except Exception as e:
                 print("Ошибка обработки события:", e)
+
+        # Недоставленные заявки повторяем раз в минуту, а не на каждом поллинге.
+        if time.time() >= next_flush:
+            flush_admin_leads()
+            next_flush = time.time() + 60
 
     print("Время вышло, offset сохранён:", offset)
     return 0
