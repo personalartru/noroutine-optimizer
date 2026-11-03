@@ -801,7 +801,8 @@ function renderChecklist() {
     заголовок с пояснением. Переменные {first}, {second}, {pilot}, {tools} и
     {first_hours} бот подставляет из реального расчёта пользователя.</p>`;
   S.draft.catalog.checklist.forEach((step, i) => {
-    step.num = i + 1;
+    /* Нумерацию ставит код (enumerate в optimizer/report_pdf), поля num в файле
+       нет: запись сюда добавила бы в content.json ключ, которого код не читает. */
     const item = document.createElement("div");
     item.className = "item";
     item.innerHTML = `<h3>Шаг ${i + 1} <span class="path">checklist[${i}]</span></h3>`;
