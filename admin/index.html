@@ -86,6 +86,8 @@ details.adv summary{cursor:pointer;color:var(--dim);font-size:12.5px}
 .problems ul{margin:6px 0 0;padding-left:18px}
 .problems li{font-size:12.5px;margin-bottom:3px}
 .problems.warn{border-color:#f0dcbd;background:#fdf7ee;color:var(--warn)}
+#commit-error:not(:empty){margin-top:10px;padding:9px 11px;border:1px solid #f0c7c7;
+  background:#fdf1f1;border-radius:10px;color:#8c2f2f}
 .small{font-size:12px;color:var(--dim)}
 .dialog{position:fixed;inset:0;background:rgba(20,24,30,.45);display:none;
   align-items:center;justify-content:center;padding:16px;z-index:20}
@@ -165,6 +167,7 @@ details.adv summary{cursor:pointer;color:var(--dim);font-size:12.5px}
   <div class="box">
     <h2>Коммит в main</h2>
     <div id="commit-summary"></div>
+    <div id="commit-error"></div>
     <label style="display:block;margin:10px 0 4px;font-size:12px;color:var(--dim)">
       Сообщение коммита</label>
     <input type="text" id="commit-message">
@@ -447,21 +450,41 @@ function walkStrings(tree, prefix, visit) {
 }
 
 /* ── Разница с загруженным файлом ──────────────────────────────────────────── */
+/* Список отличается элементом по счёту — это отдельный путь: сводка коммита
+   должна показывать «catalog.spheres.4.ops.1.label», а не «catalog.spheres»
+   целиком, иначе правка одной строки выглядит как замена половины каталога. */
 function changedPaths() {
   const out = [];
+  const same = (x, y) => JSON.stringify(x) === JSON.stringify(y);
   const walk = (a, b, prefix) => {
     const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
     keys.forEach(key => {
       const path = prefix ? `${prefix}.${key}` : key;
       const x = a?.[key], y = b?.[key];
-      if (JSON.stringify(x) === JSON.stringify(y)) return;
-      if (x && y && typeof x === "object" && typeof y === "object" &&
-          !Array.isArray(x) && !Array.isArray(y)) { walk(x, y, path); return; }
+      if (same(x, y)) return;
+      if (x && y && typeof x === "object" && typeof y === "object") {
+        const bothArrays = Array.isArray(x) && Array.isArray(y);
+        if (bothArrays && x.length === y.length) { walk(x, y, path); return; }
+        if (!bothArrays) { walk(x, y, path); return; }
+      }
       if (!out.includes(path)) out.push(path);
     });
   };
   walk(S.loaded, S.draft, "");
   return out;
+}
+/* Перенести правки поверх свежей версии файла: берём main как основу и кладем
+   на него только изменённые пути черновика. Так чужие коммиты (например,
+   починка пустых строк из кода) не возвращаются обратно вместе со старым
+   черновиком. */
+function transplant(fresh, paths, draft) {
+  const tree = clone(fresh);
+  paths.forEach(p => {
+    const value = pathGet(draft, p);
+    if (value === undefined) pathDelete(tree, p);
+    else pathSet(tree, p, clone(value));
+  });
+  return tree;
 }
 
 /* ── Рендер ────────────────────────────────────────────────────────────────── */
@@ -931,27 +954,55 @@ function render() {
 }
 
 /* ── Сохранение ────────────────────────────────────────────────────────────── */
-async function commit() {
-  const message = $("#commit-message").value.trim() ||
-    "Контент: правка из админки";
+function commitError(text, fresh) {
+  /* Диалог перекрывает #main, поэтому причину пишем прямо в нём: без этого
+     владелец видит «коммит не прошёл» и ничего больше. */
+  const box = $("#commit-error");
+  box.innerHTML = `<div class="small"><b>Не отправилось.</b> ${esc(text)}</div>` +
+    (fresh ? '<div class="row" style="margin-top:8px">' +
+      '<button class="primary" id="commit-rebase">Перенести правки поверх main</button></div>' : "");
+  if (fresh) {
+    box.querySelector("#commit-rebase").addEventListener("click", () => send(true));
+  }
+}
+async function putContent(tree, sha, message) {
   const body = {
     message, branch: S.branch,
     // GitHub ждёт обычный base64 (не url-safe); русские буквы — через UTF-8.
     content: btoa(unescape(encodeURIComponent(
-      JSON.stringify(sortTree(S.draft), null, 2) + "\n")))
+      JSON.stringify(sortTree(tree), null, 2) + "\n")))
   };
-  if (S.sha) body.sha = S.sha;
+  if (sha) body.sha = sha;
+  else {
+    const cur = await gh(`https://api.github.com/repos/${S.repo}/contents/${CONTENT_FILE}?ref=${S.branch}`);
+    body.sha = cur.sha;
+  }
+  return gh(`https://api.github.com/repos/${S.repo}/contents/${CONTENT_FILE}`,
+            {method: "PUT", body: JSON.stringify(body)});
+}
+async function send(rebase) {
+  const message = $("#commit-message").value.trim() || "Контент: правка из админки";
+  const paths = changedPaths();
+  if (!paths.length) { commitError("правок нет — сохранять нечего"); return; }
+  commitError("");
   setStatus("отправляю…", "");
   try {
-    if (!body.sha) {
-      const cur = await gh(`https://api.github.com/repos/${S.repo}/contents/${CONTENT_FILE}?ref=${S.branch}`);
-      body.sha = cur.sha;
+    let sha = S.sha, tree = S.draft;
+    if (rebase) {
+      /* main ушёл вперёд: перечитываем файл, переносим на него правки и
+         берём свежий sha. Черновик целиком не отправляем — иначе вернутся
+         те изменения, которые кто-то сделал, пока страница была открыта. */
+      setStatus("переношу правки на свежую версию…", "");
+      const fresh = await readRepoFile(CONTENT_FILE, true);
+      tree = transplant(fresh.tree, paths, S.draft);
+      sha = fresh.sha;
+      S.loaded = clone(fresh.tree);
     }
-    const res = await gh(`https://api.github.com/repos/${S.repo}/contents/${CONTENT_FILE}`,
-                         {method: "PUT", body: JSON.stringify(body)});
+    const res = await putContent(tree, sha, message);
     S.sha = res.content.sha;
-    S.loaded = clone(S.draft);
-    sessionStorage.removeItem(KEYS.draft);
+    S.draft = clone(tree);
+    S.loaded = clone(tree);
+    sessionStorage.setItem(KEYS.draft, JSON.stringify(S.draft));
     $("#dlg-commit").classList.remove("open");
     setStatus(`коммит ${res.commit.sha.slice(0, 7)} записан`, "ok");
     render();
@@ -969,15 +1020,16 @@ async function commit() {
       подхватит прежнее содержимое так же.</div>`;
     $("#main").prepend(link);
   } catch (e) {
+    const text = String(e.message || e);
     setStatus("коммит не прошёл", "bad");
-    if (/409|conflict/i.test(String(e.message))) {
-      showProblems([ "В main уже лежит более новая версия файла — «Загрузить заново», " +
-                     "проверьте правки и сохраните снова." ]);
-    } else {
-      showProblems([String(e.message || e)]);
-    }
+    const stale = /409|sha|conflict|not found|out of date/i.test(text);
+    commitError(text + (stale ?
+      " — в main лежит более новая версия файла (кто-то сохранил, пока эта " +
+      "страница была открыта). «Перенести правки поверх main» сохранит ваши " +
+      "строки на свежей версии." : ""), stale);
   }
 }
+function commit() { send(false); }
 function sortTree(tree) {
   /* Порядок групп тот же, что у tools/dump_content.py: schema, meta, texts, buttons, words, catalog. */
   return {schema: tree.schema, meta: tree.meta, texts: tree.texts,
