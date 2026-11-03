@@ -374,16 +374,19 @@ function validate() {
   });
   if (cat.fire_tool.id !== "fire")
     problems.push("catalog.fire_tool.id: должен остаться «fire» — на него смотрит расчёт");
+  const KINDS = kindMap();
   cat.count_buttons.forEach((row, i) => row.forEach((pair, j) => {
     const w = `catalog.count_buttons[${i}][${j}]`;
     const payload = String(pair[1] || "");
+    const kind = payload.split(":")[1];
     if (!String(pair[0] || "").trim()) problems.push(`${w}: пустая подпись кнопки`);
-    if (!/^opt:[a-z]:[\w-]+$/.test(payload) && !/^opt:(reset|again|start|cancel)$/.test(payload))
+    if (!/^opt:[a-z_]+(:[\w-]+)?$/.test(payload))
       problems.push(`${w}: payload «${payload}» должен быть вида opt:c:8`);
+    else if (!(kind in KINDS))
+      problems.push(`${w}: вид payload'а «${kind}» dispatcher не знает ` +
+                    `(из справочника кода: ${Object.keys(KINDS).join(", ")})`);
     if (payload.length > limits.payload)
       problems.push(`${w}: payload ${payload.length} символов, лимит ${limits.payload}`);
-    if (!(payload.split(":")[1] in HANDLERS))
-      problems.push(`${w}: вид payload'а «${payload.split(":")[1]}» dispatcher не знает`);
   }));
   cat.count_buttons.forEach((row, i) => {
     if (row.length > limits.row_buttons)
@@ -394,12 +397,13 @@ function validate() {
     const w = `catalog.checklist[${i}]`;
     for (const key of ["emoji", "title", "short", "body", "when"])
       if (!String(step[key] || "").trim()) problems.push(`${w}.${key}: пусто`);
-    ["title", "short", "body", "when"].forEach(key => {
+    CHECKLIST_FIELDS.forEach(key => {
+      const allowed = catalogVars(key);
       const unknown = [...String(step[key] || "").matchAll(/\{([a-z_][a-z0-9_]*)(?![{])/g)]
-        .map(m => m[1]).filter(v => !(CATALOG_VARS[key] || []).includes(v));
+        .map(m => m[1]).filter(v => !allowed.includes(v));
       if (unknown.length)
         problems.push(`${w}.${key}: переменные {${unknown.join("}, {")}} не подставляются ` +
-                      `в чек-листе (доступны: ${CATALOG_VARS[key].join(", ")})`);
+                      `в чек-листе (доступны: ${allowed.join(", ")})`);
     });
   });
   /* Фигурные скобки код подставляет только в полях чек-листа: в остальном
@@ -419,13 +423,20 @@ function validate() {
   S.problems = problems; S.warnings = warnings;
   return problems.length === 0;
 }
-const CATALOG_VARS = {title: ["first", "second", "pilot", "tools", "i"],
-                      short: ["first", "first_hours", "second", "pilot", "tools"],
-                      body: ["first", "second", "pilot", "tools"],
-                      when: []};
-/* Виды payload'ов, которые знает dispatcher бота (optimizer.HANDLERS). */
-const HANDLERS = {s: 1, m: 1, r: 1, c: 1, n: 1, o: 1, t: 1, p: 1, fb: 1,
-                  reset: 1, again: 1, start: 1, cancel: 1};
+/* Подстановки чек-листа едины для всех полей и шагов: их набор — ключи
+   values, которые кладёт optimizer.checklist_values (справочник в schema). */
+const CHECKLIST_FIELDS = ["emoji", "title", "short", "body", "when"];
+function catalogVars(field) {
+  if (!CHECKLIST_FIELDS.includes(field)) return [];
+  return (S.schema.catalog_variables?.checklist ||
+          ["first", "first_hours", "second", "pilot", "tools"]).slice();
+}
+/* Виды payload'ов, которые знает dispatcher бота (optimizer.payload_kinds). */
+function kindMap() {
+  const kinds = S.schema.payload_kinds ||
+    ["s", "m", "r", "c", "n", "o", "t", "p", "fb", "reset", "again", "start", "cancel"];
+  return Object.fromEntries(kinds.map(k => [k, 1]));
+}
 
 function walkStrings(tree, prefix, visit) {
   Object.entries(tree || {}).forEach(([key, value]) => {
@@ -489,8 +500,8 @@ function titleOf(path) {
 function varsFor(path) {
   const fromSchema = S.schema.variables[path];
   if (fromSchema) return fromSchema.slice();
-  const m = /^catalog\.checklist\.\d+\.(emoji|title|short|body|when)$/.exec(path);
-  return m ? (CATALOG_VARS[m[1]] || []).slice() : [];
+  const m = /^catalog\.checklist\.\d+\.([a-z_]+)$/.exec(path);
+  return m ? catalogVars(m[1]) : [];
 }
 function fieldRow(path, value, opts = {}) {
   const vars = opts.chips === false ? [] : varsFor(path);

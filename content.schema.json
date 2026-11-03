@@ -1,4 +1,13 @@
 {
+  "catalog_variables": {
+    "checklist": [
+      "first",
+      "first_hours",
+      "pilot",
+      "second",
+      "tools"
+    ]
+  },
   "defaults": {
     "buttons": {
       "after_lead": {
@@ -922,7 +931,16 @@
       "paths": [
         "texts.intro",
         "texts.people_phrase",
-        "texts.mode.body"
+        "texts.mode.body",
+        "words.people.0",
+        "words.people.1",
+        "words.people.2",
+        "words.roles.0",
+        "words.roles.1",
+        "words.roles.2",
+        "words.ops.0",
+        "words.ops.1",
+        "words.ops.2"
       ],
       "title": "Приветствие и выбор режима"
     },
@@ -1111,6 +1129,21 @@
     "row_buttons": 7,
     "text_chunk": 900
   },
+  "payload_kinds": [
+    "again",
+    "c",
+    "cancel",
+    "fb",
+    "m",
+    "n",
+    "o",
+    "p",
+    "r",
+    "reset",
+    "s",
+    "start",
+    "t"
+  ],
   "schema": 1,
   "variables": {
     "buttons.after_lead.again": [],
@@ -1375,6 +1408,15 @@
       "pct"
     ],
     "texts.tools.title": [],
-    "texts.unknown_button": []
+    "texts.unknown_button": [],
+    "words.ops.0": [],
+    "words.ops.1": [],
+    "words.ops.2": [],
+    "words.people.0": [],
+    "words.people.1": [],
+    "words.people.2": [],
+    "words.roles.0": [],
+    "words.roles.1": [],
+    "words.roles.2": []
   }
 }

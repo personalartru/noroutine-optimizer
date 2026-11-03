@@ -141,9 +141,17 @@ def build_schema():
         for leaf in content._template_paths(content.DEFAULTS[group]):
             path = f"{group}.{leaf}"
             variables[path] = content.variables(path)
+    # Слова-формы (люди/роли/операции) — списки, их _template_paths не видит,
+    # а админка их показывает: подписи «один специалист / несколько …» правятся.
+    for kind, forms in content.DEFAULTS["words"].items():
+        for i in range(len(forms)):
+            variables[f"words.{kind}.{i}"] = content.variables(f"words.{kind}.{i}")
     paths = [f"{group}.{leaf}"
              for group in ("texts", "buttons")
              for leaf in content._leaf_paths(content.DEFAULTS[group])]
+    paths += [f"words.{kind}.{i}"
+              for kind, forms in content.DEFAULTS["words"].items()
+              for i in range(len(forms))]
     grouped = {}
     for group in UI_GROUPS + [{"id": "other", "title": "Прочее", "prefixes": []}]:
         grouped[group["id"]] = group["title"]
@@ -165,6 +173,14 @@ def build_schema():
         "internal": content.internal_fields(),
         "demo": content.DEMO_VALUES,
         "variables": variables,
+        # Подстановки чек-листа едины для всех полей и всех шагов: их набор —
+        # ключи, которые код кладёт в values, а не догадка страницы.
+        "catalog_variables": {
+            "checklist": sorted(optimizer.checklist_values({"ops": []}, {})),
+        },
+        # Виды payload'ов, которые dispatcher разбирает: страница сверяет подписи
+        # кнопок количества с этим списком, а не с зашитым перечнем.
+        "payload_kinds": optimizer.payload_kinds(),
         "groups": layout,
         "group_titles": grouped,
         "field_labels": FIELD_LABELS,

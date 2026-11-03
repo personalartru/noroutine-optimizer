@@ -684,12 +684,10 @@ def dispatch(payload, session):
     kind = parts[1] if len(parts) > 1 else ""
     arg = parts[2] if len(parts) > 2 else ""
 
-    if kind == "reset" or kind == "again":
+    if kind in NO_ARG_KINDS:
+        if kind == "cancel":
+            return {**session, "step": "done"}, emit(content.text("cancel"))
         return start(session)
-    if kind == "start":
-        return start(session)
-    if kind == "cancel":
-        return {**session, "step": "done"}, emit(content.text("cancel"))
 
     handler = HANDLERS.get(kind)
     if not handler:
@@ -920,6 +918,16 @@ HANDLERS = {
     "p": on_pdf,
     "fb": on_feedback,
 }
+
+# Кнопки без аргумента: dispatch разбирает их до HANDLERS. Список живёт рядом с
+# разбором, чтобы справочник админки (content.schema.json) перечислял виды
+# payload'ов из кода, а не из догадки на странице.
+NO_ARG_KINDS = ("reset", "again", "start", "cancel")
+
+
+def payload_kinds():
+    """Виды payload'ов `opt:<вид>`, которые dispatch действительно понимает."""
+    return sorted(set(HANDLERS) | set(NO_ARG_KINDS))
 
 
 # ── Текстовые сообщения внутри активной сессии ───────────────────────────────
