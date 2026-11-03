@@ -522,13 +522,19 @@ function fieldRow(path, value, opts = {}) {
       ${changed ? '<button class="ghost" data-revert>вернуть</button>' : ""}
     </div>
     <textarea class="${opts.mono ? "mono" : ""}" data-field="${esc(path)}"
-      rows="${opts.rows || 2}">${esc(value)}</textarea>
+      rows="${opts.rows || 2}"></textarea>
     ${vars.length ? `<div class="chips">${vars.map(v =>
       `<span class="chip${used.includes(v) ? "" : " miss"}" data-var="{${v}}"
         title="код подставляет ${v}">${esc(v)}</span>`).join("")}</div>` : ""}
     <div class="preview">${preview || '<span class="small">пусто</span>'}</div>
     ${silent ? '<div class="small">Правка дойдёт до файла, но в сообщениях это поле не показывается.</div>' : ""}
     <div class="meta"><span data-count></span></div>`;
+  /* Значение ставим свойством, а не текстом внутри <textarea>: HTML-парсер
+     выбрасывает первый перевод строки сразу за открывающим тегом, а ведущий «\n»
+     у многих сообщений — часть вёрстки (пустая строка перед абзацем). Через
+     innerHTML каждая правка молча съедала эти пустые строки во всех полях
+     открытой вкладки, не только в отредактированном. */
+  div.querySelector("textarea").value = String(value ?? "");
   return div;
 }
 function bindFieldEvents(scope) {

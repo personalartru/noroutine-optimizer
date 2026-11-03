@@ -357,5 +357,17 @@ for path in [f"texts.{p}" for p in paths_of(content.DEFAULTS["texts"])]:
 check("каждый длинный текст режется по абзацам", not long_texts,
       "; ".join(long_texts[:3]))
 
+# ── 9. Страница админки не должна терять пустые строки сообщений ─────────────
+# Значение внутри <textarea>…</textarea> HTML-парсер читает с выбрасыванием
+# первого перевода строки: каждая правка съедала ведущую пустую строку у всех
+# полей открытой вкладки. Значение обязано приходить свойством value.
+PAGE = os.path.join(ROOT, "admin", "index.html")
+src = open(PAGE, encoding="utf-8").read()
+inline = re.findall(r"<textarea[^>]*>\s*\$\{[^}]*\}", src)
+check("админка ставит значение textarea свойством, не через innerHTML",
+      not inline, "; ".join(inline[:2]))
+check("страница читает content.json и справочник",
+      "content.json" in src and "content.schema.json" in src)
+
 print(f"\n{sum(results)}/{len(results)} проверок пройдено")
 sys.exit(0 if all(results) else 1)
