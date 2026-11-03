@@ -20,6 +20,7 @@ import glob
 import json
 import os
 import re
+from datetime import datetime
 
 try:
     from fpdf import FPDF
@@ -181,29 +182,56 @@ def _adapt_fonts(data):
     return json.loads(text) if changed else data
 
 
+def _creation_date(data):
+    """Дата в заголовке PDF — только день, без часов и секунд.
+
+    fpdf2 пишет в файл /CreationDate с точностью до секунды, и два вызова подряд
+    дают разные байты. Транспорт кэширует загрузку по хэшу файла, поэтому второй
+    клик по «Полному отчёту» через минуту снова грузил бы тот же PDF в MAX. С
+    фиксированной датой на полночь ночи отчёт побайтово одинаковый, и кэш работает.
+    """
+    raw = str(data.get("date") or "")
+    for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(raw.strip(), fmt)
+        except ValueError:
+            continue
+    today = datetime.now()
+    return today.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
 def _render(data, k):
     """Один проход вёрстки с коэффициентом высоты строк `k`."""
     pdf = Report(orientation="P", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=14)
     pdf.set_margins(16, 14, 16)
+    pdf.set_creation_date(_creation_date(data))
     pdf.add_font("body", "", font_regular())
     bold = font_bold()
     if bold:
         pdf.add_font("body", "B", bold)
     pdf.add_page()
 
+    # Подписи разделов приходят вместе с цифрами (data["sections"]): текст
+    # живёт в контенте, а этот модуль отвечает только за вёрстку. Литералы ниже —
+    # запасной вариант на случай отчёта, собранного без секций.
+    sections = data.get("sections") or {}
     # шапка
     pdf.set_font("body", size=9)
     pdf.set_text_color(*GREY)
-    pdf.cell(0, 4.6 * k, f"{clean(data.get('date', ''))} · расчёт «Оптимизатора»",
+    pdf.cell(0, 4.6 * k, clean(sections.get("topline")
+                               or f"{clean(data.get('date', ''))} · расчёт «Оптимизатора»"),
              new_x="LMARGIN", new_y="NEXT")
     pdf.set_text_color(*INK)
     pdf.set_font("body", "B", size=16)
-    pdf.multi_cell(0, 7.4 * k, clean(data.get("title") or "Отчёт оптимизатора"),
+    pdf.multi_cell(0, 7.4 * k, clean(data.get("title")
+                                     or sections.get("title_fallback")
+                                     or "Отчёт оптимизатора"),
                    new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("body", size=9.5)
     subtitle = " · ".join(part for part in (clean(data.get("who", "")),
-                                            f"{clean(data.get('people', ''))} чел",
+                                            clean(sections.get("people_line")
+                                                  or f"{clean(data.get('people', ''))} чел"),
                                             clean(data.get("rate", "")),
                                             clean(data.get("headline", ""))) if part)
     pdf.set_text_color(*GREY)
@@ -211,7 +239,7 @@ def _render(data, k):
     pdf.set_text_color(*INK)
     pdf.ln(2 * k)
 
-    _heading(pdf, "Рутина по операциям", k)
+    _heading(pdf, sections.get("ops") or "Рутина по операциям", k)
     ops = data.get("ops") or []
     if ops:
         for op in ops:
@@ -219,13 +247,13 @@ def _render(data, k):
                  " · ".join(p for p in (clean(op.get("value", "")),
                                         clean(op.get("note", ""))) if p), k)
     else:
-        _para(pdf, "Операции не выбраны.", grey=True, k=k)
+        _para(pdf, sections.get("empty_ops") or "Операции не выбраны.", grey=True, k=k)
 
-    _heading(pdf, "Экономия", k)
+    _heading(pdf, sections.get("saving") or "Экономия", k)
     for label, value in (data.get("figures") or []):
         _row(pdf, label, value, k)
 
-    _heading(pdf, "Инструменты и бюджет", k)
+    _heading(pdf, sections.get("tools") or "Инструменты и бюджет", k)
     for tool in (data.get("tools") or []):
         _row(pdf, tool.get("title", ""), clean(tool.get("value", "")), k)
         if tool.get("note"):
@@ -233,7 +261,7 @@ def _render(data, k):
     for label, value in (data.get("budget") or []):
         _row(pdf, label, value, k)
 
-    _heading(pdf, "Чек-лист внедрения", k)
+    _heading(pdf, sections.get("checklist") or "Чек-лист внедрения", k)
     for step in (data.get("steps") or []):
         pdf.set_font("body", "B", size=10.2)
         pdf.multi_cell(0, 4.9 * k,
@@ -243,12 +271,13 @@ def _render(data, k):
         _para(pdf, step.get("body", ""), size=9.2, grey=True, height=4.3, k=k)
         pdf.ln(1.0 * k)
 
-    _heading(pdf, "Как читать цифры", k)
+    _heading(pdf, sections.get("howto") or "Как читать цифры", k)
     _para(pdf, data.get("disclaimer", ""), size=8.8, grey=True, height=4.3, k=k)
     channel = clean(data.get("channel", ""))
     if channel:
         pdf.ln(1.2 * k)
-        _para(pdf, f"Разборы и готовые связки: {channel}", size=9, k=k)
+        _para(pdf, clean(sections.get("channel_line")
+                          or f"Разборы и готовые связки: {channel}"), size=9, k=k)
     return pdf
 
 

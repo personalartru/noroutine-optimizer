@@ -1,0 +1,1380 @@
+{
+  "defaults": {
+    "buttons": {
+      "after_lead": {
+        "again": "🔧 Оптимизатор заново",
+        "channel": "Канал про автоматизацию"
+      },
+      "final": {
+        "again": "Пройти заново",
+        "lead": "💬 Отправить заявку",
+        "pdf": "📄 Полный отчёт (PDF)"
+      },
+      "marks": {
+        "off": "▫️",
+        "on": "✅"
+      },
+      "mode": {
+        "self": "Только я",
+        "team": "Несколько человек"
+      },
+      "more": {
+        "add": "Добавить специальность",
+        "calc": "Считаем рутину"
+      },
+      "ops": {
+        "clear": "Сбросить выбор",
+        "item": "{mark} {label} · {hours} ч",
+        "ok": "Посчитать рутину"
+      },
+      "reset": "🔄 Начать заново",
+      "roles": {
+        "clear": "Сбросить выбор",
+        "item": "{mark} {label} · {rate}/ч",
+        "ok": "Сколько их?"
+      },
+      "start": "🔧 Начать расчёт",
+      "tools": {
+        "back": "Выбрать другие инструменты",
+        "clear": "Сбросить",
+        "item": "{mark} {label}",
+        "ok": "Показать экономию",
+        "plan": "Дальше: чек-лист внедрения"
+      }
+    },
+    "catalog": {
+      "checklist": [
+        {
+          "body": "Опишите «{first}» по шагам: кто начинает, где живут данные, что значит «готово».",
+          "emoji": "📝",
+          "short": "Зафиксировать процесс",
+          "title": "Зафиксировать процесс как есть",
+          "when": "0,5 дня"
+        },
+        {
+          "body": "Берём самое дорогое — «{first}» ({first_hours} ч/мес на человека): {pilot}. Остальное после первого результата.",
+          "emoji": "🎯",
+          "short": "Пилот: «{first}» ({first_hours} ч/мес)",
+          "title": "Выбрать один пилот",
+          "when": "1 неделя"
+        },
+        {
+          "body": "Регламенты, таблицы-источники, API-ключи и права, ответственный за исключения.",
+          "emoji": "🔑",
+          "short": "Данные, доступы, права",
+          "title": "Подготовить данные и доступы",
+          "when": "2–3 дня"
+        },
+        {
+          "body": "Первая версия ({tools}) работает вместе с человеком: автомат делает, человек правит правила — так находятся крайние случаи.",
+          "emoji": "🛠",
+          "short": "MVP рядом с руками",
+          "title": "Собрать MVP и гонять рядом с руками",
+          "when": "1–2 недели"
+        },
+        {
+          "body": "Сколько уходило и сколько осталось. Только замер отличает «кажется, быстрее» от реальной экономии.",
+          "emoji": "📏",
+          "short": "Замер до и после",
+          "title": "Замерить часы до и после",
+          "when": "2 недели"
+        },
+        {
+          "body": "Кто правит сценарии, куда писать при сбое, как добавить операцию.",
+          "emoji": "🧭",
+          "short": "Ответственный и инструкция",
+          "title": "Передать владельцу и задокументировать",
+          "when": "1 день"
+        },
+        {
+          "body": "По «{first}» есть цифра — добавляем «{second}» и остальное из расчёта: они встают на готовый контур дешевле.",
+          "emoji": "📈",
+          "short": "Тираж: «{second}» и остальное",
+          "title": "Тиражировать",
+          "when": "1–2 недели на операцию"
+        }
+      ],
+      "count_buttons": [
+        [
+          [
+            "1",
+            "opt:c:1"
+          ],
+          [
+            "2",
+            "opt:c:2"
+          ],
+          [
+            "3",
+            "opt:c:3"
+          ],
+          [
+            "4",
+            "opt:c:4"
+          ],
+          [
+            "5",
+            "opt:c:5"
+          ]
+        ],
+        [
+          [
+            "6–10",
+            "opt:c:8"
+          ],
+          [
+            "11–25",
+            "opt:c:18"
+          ]
+        ],
+        [
+          [
+            "Своё число",
+            "opt:c:x"
+          ]
+        ]
+      ],
+      "count_range": {
+        "opt:c:18": 18,
+        "opt:c:8": 8
+      },
+      "fire_tool": {
+        "factor": 1.0,
+        "id": "fire",
+        "label": "Уволить всех 🙂",
+        "what": "радикальный метод, который мы не рекомендуем"
+      },
+      "self_role": {
+        "label": "Я сам (руковожу и делаю руками)",
+        "salary": 120000
+      },
+      "spheres": [
+        {
+          "blurb": "брифы, правки и отчёты по проектам живут в чатах и почте",
+          "id": "agency",
+          "label": "Digital / агентство",
+          "ops": [
+            {
+              "detail": "один и тот же шаблон, правки клиента по кругу",
+              "hours": 20,
+              "id": "brief",
+              "label": "Сбор брифов и ТЗ"
+            },
+            {
+              "detail": "вопросы про статус, сроки и стоимость заново каждый раз",
+              "hours": 22,
+              "id": "client",
+              "label": "Переписка с клиентами"
+            },
+            {
+              "detail": "обход трекера, напоминания исполнителям",
+              "hours": 18,
+              "id": "track",
+              "label": "Контроль задач и сроков"
+            },
+            {
+              "detail": "выгрузки, сведение в таблицу, график для клиента",
+              "hours": 14,
+              "id": "report",
+              "label": "Отчёты по проектам и часам"
+            },
+            {
+              "detail": "поиск файлов, ссылки, права доступа",
+              "hours": 10,
+              "id": "assets",
+              "label": "Передача макетов и материалов"
+            },
+            {
+              "detail": "по заявкам, отправка, загрузка в учётную систему",
+              "hours": 10,
+              "id": "invoice",
+              "label": "Счета и закрывающие документы"
+            }
+          ],
+          "roles": [
+            {
+              "id": "account",
+              "label": "Аккаунт-менеджер",
+              "salary": 90000
+            },
+            {
+              "id": "copy",
+              "label": "Копирайтер",
+              "salary": 70000
+            },
+            {
+              "id": "target",
+              "label": "Таргетолог",
+              "salary": 100000
+            },
+            {
+              "id": "design",
+              "label": "Дизайнер",
+              "salary": 85000
+            }
+          ]
+        },
+        {
+          "blurb": "карточки, отгрузки, отзывы и отчёты каждый день одними и теми же руками",
+          "id": "ecom",
+          "label": "E-commerce",
+          "ops": [
+            {
+              "detail": "описания, характеристики, фото, цены по регламенту",
+              "hours": 22,
+              "id": "cards",
+              "label": "Заполнение и обновление карточек"
+            },
+            {
+              "detail": "шаблоны, модерация, отработка негатива",
+              "hours": 18,
+              "id": "reviews",
+              "label": "Ответы на отзывы и вопросы"
+            },
+            {
+              "detail": "обход кабинетов, таблички, поиск расхождений",
+              "hours": 20,
+              "id": "stock",
+              "label": "Сверка остатков и заказов"
+            },
+            {
+              "detail": "перенос данных из заявок в учётную систему, документы",
+              "hours": 16,
+              "id": "ship",
+              "label": "Оформление отгрузок и возвратов"
+            },
+            {
+              "detail": "ежедневной ручной мониторинг листов и кабинетов",
+              "hours": 12,
+              "id": "price",
+              "label": "Контроль цен и конкурентов"
+            },
+            {
+              "detail": "выгрузки из кабинетов, сведение в таблицу, график",
+              "hours": 14,
+              "id": "report",
+              "label": "Отчётность по продажам"
+            }
+          ],
+          "roles": [
+            {
+              "id": "support",
+              "label": "Оператор поддержки",
+              "salary": 60000
+            },
+            {
+              "id": "orders",
+              "label": "Менеджер заказов",
+              "salary": 75000
+            },
+            {
+              "id": "content",
+              "label": "Контент-менеджер",
+              "salary": 65000
+            },
+            {
+              "id": "market",
+              "label": "Менеджер маркетплейсов",
+              "salary": 90000
+            }
+          ]
+        },
+        {
+          "blurb": "фидбек, баг-репорты, бэклог и метрики разлетаются по чатам",
+          "id": "it",
+          "label": "IT / продукт",
+          "ops": [
+            {
+              "detail": "чаты, почта, сториз — перенос в задачу с деталями",
+              "hours": 20,
+              "id": "feedback",
+              "label": "Разбор фидбека и баг-репортов"
+            },
+            {
+              "detail": "ручные апдейты статусов, приоритеты, комментарии",
+              "hours": 16,
+              "id": "backlog",
+              "label": "Ведение бэклога и задач"
+            },
+            {
+              "detail": "запросы, выгрузки, сведение в дашборд вручную",
+              "hours": 14,
+              "id": "metrics",
+              "label": "Сбор метрик и отчётов"
+            },
+            {
+              "detail": "шаблонные письма, контроль шагов, напоминания",
+              "hours": 15,
+              "id": "onboard",
+              "label": "Онбординг и дожим клиентов"
+            },
+            {
+              "detail": "обход очереди, эскалации, ответы «где моя задача»",
+              "hours": 12,
+              "id": "ticket",
+              "label": "Контроль тикетов и статусов"
+            },
+            {
+              "detail": "сбор изменений, тексты, рассылка",
+              "hours": 8,
+              "id": "release",
+              "label": "Релизные заметки и комментарии"
+            }
+          ],
+          "roles": [
+            {
+              "id": "l1",
+              "label": "L1-поддержка",
+              "salary": 65000
+            },
+            {
+              "id": "analyst",
+              "label": "Аналитик",
+              "salary": 130000
+            },
+            {
+              "id": "qa",
+              "label": "Тестировщик",
+              "salary": 110000
+            },
+            {
+              "id": "pm",
+              "label": "Проджект-менеджер",
+              "salary": 145000
+            }
+          ]
+        },
+        {
+          "blurb": "заявки, склад, смены и документы сходятся в одну таблицу у одного человека",
+          "id": "production",
+          "label": "Производство",
+          "ops": [
+            {
+              "detail": "телефон, чат, таблица — и снова по кругу",
+              "hours": 20,
+              "id": "orders",
+              "label": "Приём и распределение заявок"
+            },
+            {
+              "detail": "пересчёт, поиск расхождений, акты",
+              "hours": 18,
+              "id": "stock",
+              "label": "Сверка остатков на складе"
+            },
+            {
+              "detail": "ручная расстановка людей и заказов по дням",
+              "hours": 14,
+              "id": "plan",
+              "label": "Планирование смен и загрузки"
+            },
+            {
+              "detail": "заполнение, печать, отправка контрагентам",
+              "hours": 12,
+              "id": "doc",
+              "label": "Накладные, акты и ТТН"
+            },
+            {
+              "detail": "напоминания поставщикам, сверка документов",
+              "hours": 12,
+              "id": "supply",
+              "label": "Контроль поставок и оплат"
+            },
+            {
+              "detail": "выгрузка из учётки, сведение в таблицу",
+              "hours": 10,
+              "id": "report",
+              "label": "Отчёты по простоям и браку"
+            }
+          ],
+          "roles": [
+            {
+              "id": "dispatch",
+              "label": "Диспетчер",
+              "salary": 70000
+            },
+            {
+              "id": "supply",
+              "label": "Менеджер закупок",
+              "salary": 100000
+            },
+            {
+              "id": "store",
+              "label": "Кладовщик",
+              "salary": 60000
+            },
+            {
+              "id": "master",
+              "label": "Мастер смены",
+              "salary": 95000
+            }
+          ]
+        },
+        {
+          "blurb": "запись, напоминания и ответы в мессенджерах отнимают весь день у администратора",
+          "id": "services",
+          "label": "Услуги / бьюти",
+          "ops": [
+            {
+              "detail": "телефон, WhatsApp, календарь — одно и то же по десять раз",
+              "hours": 22,
+              "id": "record",
+              "label": "Запись и переносы клиентов"
+            },
+            {
+              "detail": "прайс, свободные окна, адрес, как записаться",
+              "hours": 20,
+              "id": "chat",
+              "label": "Ответы в мессенджерах и звонки"
+            },
+            {
+              "detail": "ручная рассылка накануне, подтверждение",
+              "hours": 14,
+              "id": "remind",
+              "label": "Напоминания о визите"
+            },
+            {
+              "detail": "выгрузка из CRM, сведение в таблицу",
+              "hours": 10,
+              "id": "revenue",
+              "label": "Отчёт по выручке и загрузке"
+            },
+            {
+              "detail": "одинаковые рубрики, ручная публикация",
+              "hours": 10,
+              "id": "social",
+              "label": "Посты и сторис по шаблону"
+            },
+            {
+              "detail": "остатки, заявка поставщику, сверка",
+              "hours": 8,
+              "id": "supply",
+              "label": "Закупка расходников"
+            }
+          ],
+          "roles": [
+            {
+              "id": "admin",
+              "label": "Администратор",
+              "salary": 55000
+            },
+            {
+              "id": "dispatch",
+              "label": "Диспетчер заявок",
+              "salary": 65000
+            },
+            {
+              "id": "content",
+              "label": "Контент-менеджер",
+              "salary": 60000
+            },
+            {
+              "id": "market",
+              "label": "Маркетолог",
+              "salary": 95000
+            }
+          ]
+        },
+        {
+          "blurb": "первичка, платежи и сверки приходят каждый день и каждый день их кто-то ищет руками",
+          "id": "finance",
+          "label": "Финансы / учёт",
+          "ops": [
+            {
+              "detail": "почта, ЭДО, папки, поиск недостающих документов",
+              "hours": 24,
+              "id": "primary",
+              "label": "Сбор и сверка первички"
+            },
+            {
+              "detail": "ручное отнесение, назначения, разбивки",
+              "hours": 18,
+              "id": "bank",
+              "label": "Разнос платежей и выписок"
+            },
+            {
+              "detail": "создание документов по заявкам, отправка клиентам",
+              "hours": 14,
+              "id": "invoice",
+              "label": "Счета, акты и УПД"
+            },
+            {
+              "detail": "выгрузки, сведение план/факта в таблицу",
+              "hours": 14,
+              "id": "budget",
+              "label": "Отчёты по расходам и бюджету"
+            },
+            {
+              "detail": "сверки с контрагентами, поиск расхождений",
+              "hours": 16,
+              "id": "close",
+              "label": "Закрытие периода и реконсиляция"
+            },
+            {
+              "detail": "контроль дебиторки, письма и звонки",
+              "hours": 10,
+              "id": "remind",
+              "label": "Напоминания по оплатам"
+            }
+          ],
+          "roles": [
+            {
+              "id": "account",
+              "label": "Бухгалтер",
+              "salary": 85000
+            },
+            {
+              "id": "check",
+              "label": "Оператор сверок",
+              "salary": 65000
+            },
+            {
+              "id": "finman",
+              "label": "Финменеджер",
+              "salary": 130000
+            },
+            {
+              "id": "kadro",
+              "label": "Кадровик",
+              "salary": 70000
+            }
+          ]
+        },
+        {
+          "blurb": "заявки приходят из пяти источников, и каждую кто-то открывает, копирует и прозванивает",
+          "id": "marketing",
+          "label": "Маркетинг",
+          "ops": [
+            {
+              "detail": "открыть почту или таблицу, перенести в CRM, поставить статус",
+              "hours": 24,
+              "id": "leads",
+              "label": "Разбор заявок из форм и чатов"
+            },
+            {
+              "detail": "копирование полей, дедупликация, ручные комментарии",
+              "hours": 16,
+              "id": "crm",
+              "label": "Перенос лидов между системами"
+            },
+            {
+              "detail": "выгрузки из кабинетов, сведение CPL/ДРР в таблицу",
+              "hours": 14,
+              "id": "camp",
+              "label": "Сбор отчётов по кампаниям"
+            },
+            {
+              "detail": "одни и те же вопросы про цену, сроки, адрес",
+              "hours": 15,
+              "id": "social",
+              "label": "Ответы в комментах и директе"
+            },
+            {
+              "detail": "повторяющиеся брифы, правки, контроль сроков",
+              "hours": 12,
+              "id": "brief",
+              "label": "ТЗ креативам и подрядчикам"
+            },
+            {
+              "detail": "сверка актов, напоминания, загрузка в учётную систему",
+              "hours": 10,
+              "id": "pay",
+              "label": "Контроль оплат и документов"
+            }
+          ],
+          "roles": [
+            {
+              "id": "target",
+              "label": "Таргетолог",
+              "salary": 100000
+            },
+            {
+              "id": "smm",
+              "label": "SMM-менеджер",
+              "salary": 70000
+            },
+            {
+              "id": "content",
+              "label": "Контент-менеджер",
+              "salary": 65000
+            },
+            {
+              "id": "analyst",
+              "label": "Маркетинговый аналитик",
+              "salary": 120000
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "factor": 0.65,
+          "id": "chat",
+          "impl": [
+            60000,
+            150000
+          ],
+          "label": "Чат-бот",
+          "pilot": "перевести 5–10 самых частых вопросов на сценарии бота",
+          "support": [
+            8000,
+            15000
+          ],
+          "what": "бот закрывает повторяющиеся обращения и заявки: отвечает по сценариям, собирает данные и кладёт их туда, где нужно"
+        },
+        {
+          "factor": 0.85,
+          "id": "agent",
+          "impl": [
+            90000,
+            250000
+          ],
+          "label": "AI-агент",
+          "pilot": "автоответы и суммаризация обращений с проверкой человеком",
+          "support": [
+            15000,
+            30000
+          ],
+          "what": "модель читает входящее сообщение или документ, понимает смысл, готовит черновик ответа и передаёт человеку только спорное"
+        },
+        {
+          "factor": 0.75,
+          "id": "n8n",
+          "impl": [
+            40000,
+            120000
+          ],
+          "label": "n8n-воркфлоу",
+          "pilot": "сквозная связка «источник → система → уведомление»",
+          "support": [
+            5000,
+            12000
+          ],
+          "what": "связки между системами: заявка → задача → уведомление → отчёт, без копирования поля из окна в окно"
+        },
+        {
+          "factor": 0.5,
+          "id": "tracker",
+          "impl": [
+            30000,
+            90000
+          ],
+          "label": "Интеграция Яндекс Трекер",
+          "pilot": "вебхук на создание задач плюс автоназначение и уведомления",
+          "support": [
+            4000,
+            10000
+          ],
+          "what": "задачи создаются сами: из форм, чатов и писем, с полями, исполнителем и автоматическими статусами"
+        },
+        {
+          "factor": 0.9,
+          "id": "full",
+          "impl": [
+            200000,
+            500000
+          ],
+          "label": "Комплексная автоматизация",
+          "pilot": "один процесс от входа заявки до отчёта, потом тираж на соседние",
+          "support": [
+            25000,
+            50000
+          ],
+          "what": "контур процесса целиком: бот + воркфлоу + трекер + дашборды, человек остаётся только на исключениях"
+        }
+      ]
+    },
+    "meta": {
+      "channel_url": "https://max.ru/channel_noroutine"
+    },
+    "texts": {
+      "cancel": "Оптимизатор остановил. Продолжить — «Начать заново» или /старт.",
+      "checklist": {
+        "fallback_first": "повторяющаяся операция",
+        "fallback_pilot": "переводим шаг в сценарий",
+        "fallback_second": "соседние операции",
+        "fallback_tools": "связки",
+        "full_item": "<b>{i}. {title}</b> — {body}\n   <i>{when}</i>",
+        "full_title": "<b>Чек-лист внедрения — подробно</b>",
+        "hint": "Пояснения к каждому шагу, расчёт и бюджет — кнопкой «{pdf}» ниже.",
+        "item": "{i}. {emoji} {short} — <i>{when}</i>",
+        "title": "<b>Чек-лист внедрения</b>"
+      },
+      "count": {
+        "ask": "Сколько человек в роли «{role}»? Напишите число, например 7.",
+        "body": "<b>{role}</b> — сколько таких?\nСтавка {rate}/ч.{further}\nКнопки 1–5, «6–10», «11–25» — или число сообщением.",
+        "left": " Дальше ещё {n} {word}."
+      },
+      "errors": {
+        "bad_count": "Не понял количество — выберите кнопку 1–5 или напишите число сообщением.",
+        "bad_op": "Такой операции нет в списке — выберите из кнопок.",
+        "bad_role": "Специальность не распознана — выберите из списка.",
+        "bad_tool": "Такого инструмента нет в списке.",
+        "need_number": "Нужно число — например «7» или «примерно 12». Кнопки 1–5 тоже работают.",
+        "no_op_pick": "Отметьте хотя бы одну операцию — иначе считать нечего. Можно начать заново кнопкой внизу.",
+        "no_role_pick": "Отметьте хотя бы одного специалиста — кнопки выше, можно сразу несколько.",
+        "no_sphere": "Такой сферы нет в списке — выберите из кнопок.",
+        "no_tool_pick": "Выберите инструмент 🙂 «Уволить всех» тоже считается.",
+        "sphere_first": "Сначала выберите сферу — кнопки выше."
+      },
+      "feedback": {
+        "done": "Отправил в штаб оптимизации вместе с вашим расчётом — обычно отвечаем в течение дня.\n\nПересчитать другой процесс — «Оптимизатор заново» ниже.",
+        "draft": "\n\nЧерновик расчёта: {sphere} · {people} чел · {hours} ч/мес рутины · ~{cost}/мес.",
+        "prompt": "Опишите процесс одним сообщением: что делаете руками, в каких системах, сколько это времени. Контакт, если нужен ответ.\n\nПерешлю в штаб оптимизации: такие запросы он разбирает сам."
+      },
+      "fire": {
+        "body": "«Уволить всех» — и рутина исчезнет вместе с процессом 🙂\n\n<b>Экономия 100% часов: {money}/мес.</b>\n\nМинус: вместе с часами уйдут заявки, клиенты и отчётность. Шутка — но ровно про масштаб проблемы: рутину надо убирать совсем, а не делать быстрее.\n\nВ расчёт не беру — отмечайте настоящие инструменты."
+      },
+      "intro": "Оптимизатор — бот, который помогает оптимизировать ваши рабочие процессы.\n\nШесть коротких вопросов. На выходе: часы рутины, их стоимость, экономия и чек-лист внедрения.\n\n<b>Шаг 1 из 6 · Сфера деятельности</b>",
+      "mode": {
+        "body": "<b>{sphere}</b> — принято.\n\n<b>Шаг 2 из 6 · Кого оптимизируем?</b>\nВся рутина на вас — жмите «Только я»."
+      },
+      "ops": {
+        "footer": "Отмечено {n} {word} — <b>{hours} ч/мес</b> на человека.",
+        "hint": "Отмечайте повторы, тап ещё раз — снять отметку.",
+        "item": "{mark} {i}. {label} · {hours} ч/мес",
+        "title": "<b>Шаг 3 из 6 · Что повторяете руками?</b>"
+      },
+      "pdf": {
+        "needs_steps": "PDF собирается из вашего расчёта — сначала пройдём шаги. Начнём с сферы деятельности?",
+        "preparing": "Готовлю полный отчёт: рутина по операциям, экономия, бюджет и чек-лист с пояснениями."
+      },
+      "people_phrase": "{count} {word}",
+      "report": {
+        "budget_impl": "Бюджет внедрения",
+        "budget_support": "Сопровождение",
+        "channel_line": "Разборы и готовые связки: {channel}",
+        "empty_ops": "Операции не выбраны.",
+        "figure_freed": "Освобождается на человека",
+        "figure_money": "В деньгах",
+        "figure_payback": "Окупаемость",
+        "figure_routine": "Рутина сейчас",
+        "figure_saving": "Экономия",
+        "figure_take": "Забираем автоматизацией",
+        "headline": "{hours} ч/мес рутины · {cost}/мес",
+        "hours_value": "{hours} ч/мес",
+        "impl_value": "{low}–{high} разово",
+        "money_value": "{money}/мес · {year}/год",
+        "none": "—",
+        "payback_value": "~{months} мес",
+        "people_line": "{people} чел",
+        "percent_value": "{pct}%",
+        "rate": "{rate}/ч",
+        "section_checklist": "Чек-лист внедрения",
+        "section_howto": "Как читать цифры",
+        "section_ops": "Рутина по операциям",
+        "section_saving": "Экономия",
+        "section_tools": "Инструменты и бюджет",
+        "support_value": "{low}–{high}/мес",
+        "title": "Отчёт оптимизатора · {sphere}",
+        "title_fallback": "Отчёт оптимизатора",
+        "tool_value": "{low}–{high} разово",
+        "topline": "{date} · расчёт «Оптимизатора»"
+      },
+      "roles": {
+        "hint": "Можно несколько галочек — потом спрошу, сколько человек в каждой роли.",
+        "picked": "Отмечено: {picked}.",
+        "title": "<b>Шаг 2 из 6 · Отметьте специалистов</b>"
+      },
+      "rollout": {
+        "cta": "\n\nХотите конкретный план под ваш процесс — отправьте заявку кнопкой ниже.",
+        "disclaimer": "<b>Дисклеймер.</b> Расчёт ориентировочный: часы и ставки — из ваших ответов и средних по рынку, бюджет — типовой диапазон. Не оферта и не гарантия экономии; точная оценка — после разбора процесса.",
+        "head": "<b>Стоимость внедрения</b>\n\n{what}\n\n<b>Примерный бюджет:</b> {budget} разово.{support}{payback}",
+        "item": "• <b>{label}</b>: {what}",
+        "payback": "\nСредний бюджет окупается за <b>~{months} мес</b> при экономии {money}/мес.",
+        "support": "\n<b>Сопровождение:</b> {low}–{high}/мес."
+      },
+      "routine": {
+        "figures": "<b>Часы рутины:</b> {hours} ч/мес на {people} · {hours_year} ч/год\n<b>Стоимость:</b> ~<b>{cost_month}/мес</b> по ставке {rate}/ч · {cost_year} в год",
+        "head": "<b>Шаг 4 из 6 · Что получилось</b>\n\n{sphere}, {who}. Повторов — <b>{per_person} ч/мес на человека</b>, это ~{share}% месяца.\n\nОперации в расчёте:\n{ops}",
+        "item": "• {label} — <b>{hours} ч/мес</b> на человека ({detail})"
+      },
+      "savings": {
+        "head": "<b>Шаг 6 из 6 · Экономия</b>\n\n<b>Инструменты:</b> {names}\n<b>Забираем:</b> {pct}% времени рутины (потолок честной автоматизации ~92% — исключения всегда остаются)\n\n• Часы: {hours} → {after} ч/мес руками, экономия <b>{saved} ч/мес</b> · {saved_year} ч/год\n• Деньги: <b>{money_month}/мес</b> · {money_year} в год\n• На человека: <b>{freed} ч/мес</b> свободно — ~{freed_pct}% его месяца",
+        "top_item": "• {label} ({hours} ч/мес на человека): {detail}",
+        "top_title": "<b>Что освобождается первым:</b>"
+      },
+      "stale": "Похоже, это кнопка из прошлого расчёта. Нажмите «Начать заново» — пойдём с начала.",
+      "start_hint": "Я Оптимизатор: шесть коротких вопросов — и на выходе часы рутины, их стоимость, экономия и чек-лист внедрения.\n\nНапишите /старт — и поехали.",
+      "team": {
+        "body": "Команда: {roles}.\nВ расчёте <b>{people}</b>.",
+        "pair": "{label} × {count}",
+        "self": "вы один, всё на вас"
+      },
+      "tools": {
+        "fire_item": "▫️ {i}. {label} — в расчёт не пойдёт",
+        "footer": "Рутины сейчас: <b>{hours} ч/мес</b>.",
+        "hint": "Отметьте то, что реально рассматриваете — можно несколько, эффекты складываются.",
+        "item": "{mark} {i}. {label} — до {pct}% времени рутины",
+        "title": "<b>Шаг 5 из 6 · Чем убираем рутину?</b>"
+      },
+      "unknown_button": "Не распознал кнопку — нажмите «Начать заново», чтобы начать заново."
+    },
+    "words": {
+      "ops": [
+        "операция",
+        "операции",
+        "операций"
+      ],
+      "people": [
+        "человек",
+        "человека",
+        "человек"
+      ],
+      "roles": [
+        "роль",
+        "роли",
+        "ролей"
+      ]
+    }
+  },
+  "demo": {
+    "after": 391,
+    "body": "Берём самое дорогое",
+    "budget": "100 000–270 000 ₽",
+    "channel": "https://max.ru/channel_noroutine",
+    "cost": "383 726 ₽",
+    "cost_month": "383 726 ₽",
+    "cost_year": "4 604 712 ₽",
+    "count": 2,
+    "date": "3 ноября 2026",
+    "detail": "телефон, WhatsApp, календарь — одно и то же по десять раз",
+    "emoji": "🎯",
+    "first": "Запись и переносы клиентов",
+    "first_hours": 22,
+    "freed": "366 ч/мес",
+    "freed_pct": 229,
+    "further": " Дальше ещё 1 роль.",
+    "high": "270 000 ₽",
+    "hours": 22,
+    "hours_year": "24 960",
+    "i": 1,
+    "label": "Запись и переносы клиентов",
+    "low": "100 000 ₽",
+    "mark": "▫️",
+    "money": "249 423 ₽",
+    "money_month": "249 423 ₽",
+    "money_year": "2 993 070 ₽",
+    "months": "1,2",
+    "n": 1,
+    "names": "Чат-бот, n8n-воркфлоу",
+    "ops": "• …",
+    "payback": "",
+    "pct": 65,
+    "pdf": "📄 Полный отчёт (PDF)",
+    "people": "2 человека",
+    "per_person": 52,
+    "picked": "Администратор",
+    "pilot": "перевести частые вопросы на бота",
+    "rate": "340 ₽",
+    "role": "Администратор",
+    "roles": "Администратор × 2",
+    "saved": 732,
+    "saved_year": "8 784",
+    "second": "Ответы в мессенджерах",
+    "share": 33,
+    "short": "Пилот: «Запись» (22 ч/мес)",
+    "sphere": "Услуги / бьюти",
+    "support": "",
+    "title": "Выбрать один пилот",
+    "tools": "чат-бот, n8n-воркфлоу",
+    "what": "бот закрывает обращения",
+    "when": "1 неделя",
+    "who": "Администратор × 2",
+    "word": "роль",
+    "year": "2 993 070 ₽"
+  },
+  "field_labels": {
+    "blurb": "Описание сферы",
+    "body": "Пояснение",
+    "channel_url": "Ссылка на канал",
+    "detail": "Как это выглядит руками",
+    "emoji": "Эмодзи",
+    "factor": "Какую часть забирает автоматизация (0…1)",
+    "hours": "Часов в месяц",
+    "id": "Служебный ключ (его видит только расчёт)",
+    "impl": "Бюджет внедрения, ₽ [от, до]",
+    "internal": "Служебное",
+    "label": "Название",
+    "pilot": "С чего начать",
+    "salary": "Зарплата в месяц, ₽",
+    "short": "Строка в чате",
+    "support": "Поддержка в месяц, ₽ [от, до]",
+    "title": "Заголовок",
+    "what": "Что делает",
+    "when": "Срок"
+  },
+  "group_titles": {
+    "checklist": "Чек-лист внедрения",
+    "errors": "Ошибки и подсказки",
+    "greeting": "Приветствие и выбор режима",
+    "lead": "Заявка и финальные кнопки",
+    "money": "Стоимость, окупаемость, дисклеймер",
+    "ops": "Шаг 2 — рутина",
+    "other": "Прочее",
+    "people": "Шаг 1 — кого оптимизируем",
+    "report": "Отчёт (PDF и заявка владельцу)",
+    "routine": "Результат 1 — часы и стоимость",
+    "tools": "Шаг 3 — инструменты"
+  },
+  "groups": [
+    {
+      "id": "greeting",
+      "paths": [
+        "texts.intro",
+        "texts.people_phrase",
+        "texts.mode.body"
+      ],
+      "title": "Приветствие и выбор режима"
+    },
+    {
+      "id": "people",
+      "paths": [
+        "texts.roles.title",
+        "texts.roles.hint",
+        "texts.roles.picked",
+        "texts.count.body",
+        "texts.count.left",
+        "texts.count.ask",
+        "texts.team.body",
+        "texts.team.self",
+        "texts.team.pair",
+        "buttons.reset",
+        "buttons.start",
+        "buttons.mode.self",
+        "buttons.mode.team",
+        "buttons.roles.ok",
+        "buttons.roles.clear",
+        "buttons.roles.item",
+        "buttons.more.add",
+        "buttons.more.calc"
+      ],
+      "title": "Шаг 1 — кого оптимизируем"
+    },
+    {
+      "id": "ops",
+      "paths": [
+        "texts.ops.title",
+        "texts.ops.hint",
+        "texts.ops.item",
+        "texts.ops.footer",
+        "buttons.ops.ok",
+        "buttons.ops.clear",
+        "buttons.ops.item"
+      ],
+      "title": "Шаг 2 — рутина"
+    },
+    {
+      "id": "routine",
+      "paths": [
+        "texts.routine.head",
+        "texts.routine.item",
+        "texts.routine.figures",
+        "texts.savings.head",
+        "texts.savings.top_title",
+        "texts.savings.top_item"
+      ],
+      "title": "Результат 1 — часы и стоимость"
+    },
+    {
+      "id": "tools",
+      "paths": [
+        "texts.tools.title",
+        "texts.tools.hint",
+        "texts.tools.item",
+        "texts.tools.fire_item",
+        "texts.tools.footer",
+        "texts.fire.body",
+        "buttons.marks.on",
+        "buttons.marks.off",
+        "buttons.tools.ok",
+        "buttons.tools.clear",
+        "buttons.tools.item",
+        "buttons.tools.plan",
+        "buttons.tools.back"
+      ],
+      "title": "Шаг 3 — инструменты"
+    },
+    {
+      "id": "checklist",
+      "paths": [
+        "texts.checklist.title",
+        "texts.checklist.item",
+        "texts.checklist.hint",
+        "texts.checklist.full_title",
+        "texts.checklist.full_item",
+        "texts.checklist.fallback_first",
+        "texts.checklist.fallback_second",
+        "texts.checklist.fallback_pilot",
+        "texts.checklist.fallback_tools"
+      ],
+      "title": "Чек-лист внедрения"
+    },
+    {
+      "id": "money",
+      "paths": [
+        "texts.rollout.head",
+        "texts.rollout.item",
+        "texts.rollout.support",
+        "texts.rollout.payback",
+        "texts.rollout.disclaimer",
+        "texts.rollout.cta"
+      ],
+      "title": "Стоимость, окупаемость, дисклеймер"
+    },
+    {
+      "id": "report",
+      "paths": [
+        "texts.report.title",
+        "texts.report.title_fallback",
+        "texts.report.topline",
+        "texts.report.people_line",
+        "texts.report.headline",
+        "texts.report.rate",
+        "texts.report.hours_value",
+        "texts.report.percent_value",
+        "texts.report.money_value",
+        "texts.report.tool_value",
+        "texts.report.impl_value",
+        "texts.report.support_value",
+        "texts.report.payback_value",
+        "texts.report.none",
+        "texts.report.figure_routine",
+        "texts.report.figure_take",
+        "texts.report.figure_saving",
+        "texts.report.figure_money",
+        "texts.report.figure_freed",
+        "texts.report.figure_payback",
+        "texts.report.budget_impl",
+        "texts.report.budget_support",
+        "texts.report.section_ops",
+        "texts.report.section_saving",
+        "texts.report.section_tools",
+        "texts.report.section_checklist",
+        "texts.report.section_howto",
+        "texts.report.empty_ops",
+        "texts.report.channel_line"
+      ],
+      "title": "Отчёт (PDF и заявка владельцу)"
+    },
+    {
+      "id": "lead",
+      "paths": [
+        "texts.pdf.preparing",
+        "texts.pdf.needs_steps",
+        "texts.feedback.prompt",
+        "texts.feedback.done",
+        "texts.feedback.draft",
+        "buttons.final.pdf",
+        "buttons.final.lead",
+        "buttons.final.again",
+        "buttons.after_lead.again",
+        "buttons.after_lead.channel"
+      ],
+      "title": "Заявка и финальные кнопки"
+    },
+    {
+      "id": "errors",
+      "paths": [
+        "texts.stale",
+        "texts.cancel",
+        "texts.unknown_button",
+        "texts.errors.no_sphere",
+        "texts.errors.sphere_first",
+        "texts.errors.no_role_pick",
+        "texts.errors.bad_role",
+        "texts.errors.bad_count",
+        "texts.errors.need_number",
+        "texts.errors.no_op_pick",
+        "texts.errors.bad_op",
+        "texts.errors.no_tool_pick",
+        "texts.errors.bad_tool"
+      ],
+      "title": "Ошибки и подсказки"
+    },
+    {
+      "id": "other",
+      "paths": [
+        "texts.start_hint"
+      ],
+      "title": "Прочее"
+    }
+  ],
+  "internal": [
+    "catalog.self_role.label",
+    "catalog.spheres[].blurb"
+  ],
+  "limits": {
+    "button_label": 64,
+    "headcount_max": 300,
+    "hours_per_month": 160,
+    "payload": 32,
+    "row_buttons": 7,
+    "text_chunk": 900
+  },
+  "schema": 1,
+  "variables": {
+    "buttons.after_lead.again": [],
+    "buttons.after_lead.channel": [],
+    "buttons.final.again": [],
+    "buttons.final.lead": [],
+    "buttons.final.pdf": [],
+    "buttons.marks.off": [],
+    "buttons.marks.on": [],
+    "buttons.mode.self": [],
+    "buttons.mode.team": [],
+    "buttons.more.add": [],
+    "buttons.more.calc": [],
+    "buttons.ops.clear": [],
+    "buttons.ops.item": [
+      "hours",
+      "label",
+      "mark"
+    ],
+    "buttons.ops.ok": [],
+    "buttons.reset": [],
+    "buttons.roles.clear": [],
+    "buttons.roles.item": [
+      "label",
+      "mark",
+      "rate"
+    ],
+    "buttons.roles.ok": [],
+    "buttons.start": [],
+    "buttons.tools.back": [],
+    "buttons.tools.clear": [],
+    "buttons.tools.item": [
+      "label",
+      "mark"
+    ],
+    "buttons.tools.ok": [],
+    "buttons.tools.plan": [],
+    "texts.cancel": [],
+    "texts.checklist.fallback_first": [],
+    "texts.checklist.fallback_pilot": [],
+    "texts.checklist.fallback_second": [],
+    "texts.checklist.fallback_tools": [],
+    "texts.checklist.full_item": [
+      "body",
+      "i",
+      "title",
+      "when"
+    ],
+    "texts.checklist.full_title": [],
+    "texts.checklist.hint": [
+      "pdf"
+    ],
+    "texts.checklist.item": [
+      "emoji",
+      "i",
+      "short",
+      "when"
+    ],
+    "texts.checklist.title": [],
+    "texts.count.ask": [
+      "role"
+    ],
+    "texts.count.body": [
+      "further",
+      "rate",
+      "role"
+    ],
+    "texts.count.left": [
+      "n",
+      "word"
+    ],
+    "texts.errors.bad_count": [],
+    "texts.errors.bad_op": [],
+    "texts.errors.bad_role": [],
+    "texts.errors.bad_tool": [],
+    "texts.errors.need_number": [],
+    "texts.errors.no_op_pick": [],
+    "texts.errors.no_role_pick": [],
+    "texts.errors.no_sphere": [],
+    "texts.errors.no_tool_pick": [],
+    "texts.errors.sphere_first": [],
+    "texts.feedback.done": [],
+    "texts.feedback.draft": [
+      "cost",
+      "hours",
+      "people",
+      "sphere"
+    ],
+    "texts.feedback.prompt": [],
+    "texts.fire.body": [
+      "money"
+    ],
+    "texts.intro": [],
+    "texts.mode.body": [
+      "sphere"
+    ],
+    "texts.ops.footer": [
+      "hours",
+      "n",
+      "word"
+    ],
+    "texts.ops.hint": [],
+    "texts.ops.item": [
+      "hours",
+      "i",
+      "label",
+      "mark"
+    ],
+    "texts.ops.title": [],
+    "texts.pdf.needs_steps": [],
+    "texts.pdf.preparing": [],
+    "texts.people_phrase": [
+      "count",
+      "word"
+    ],
+    "texts.report.budget_impl": [],
+    "texts.report.budget_support": [],
+    "texts.report.channel_line": [
+      "channel"
+    ],
+    "texts.report.empty_ops": [],
+    "texts.report.figure_freed": [],
+    "texts.report.figure_money": [],
+    "texts.report.figure_payback": [],
+    "texts.report.figure_routine": [],
+    "texts.report.figure_saving": [],
+    "texts.report.figure_take": [],
+    "texts.report.headline": [
+      "cost",
+      "hours"
+    ],
+    "texts.report.hours_value": [
+      "hours"
+    ],
+    "texts.report.impl_value": [
+      "high",
+      "low"
+    ],
+    "texts.report.money_value": [
+      "money",
+      "year"
+    ],
+    "texts.report.none": [],
+    "texts.report.payback_value": [
+      "months"
+    ],
+    "texts.report.people_line": [
+      "people"
+    ],
+    "texts.report.percent_value": [
+      "pct"
+    ],
+    "texts.report.rate": [
+      "rate"
+    ],
+    "texts.report.section_checklist": [],
+    "texts.report.section_howto": [],
+    "texts.report.section_ops": [],
+    "texts.report.section_saving": [],
+    "texts.report.section_tools": [],
+    "texts.report.support_value": [
+      "high",
+      "low"
+    ],
+    "texts.report.title": [
+      "sphere"
+    ],
+    "texts.report.title_fallback": [],
+    "texts.report.tool_value": [
+      "high",
+      "low"
+    ],
+    "texts.report.topline": [
+      "date"
+    ],
+    "texts.roles.hint": [],
+    "texts.roles.picked": [
+      "picked"
+    ],
+    "texts.roles.title": [],
+    "texts.rollout.cta": [],
+    "texts.rollout.disclaimer": [],
+    "texts.rollout.head": [
+      "budget",
+      "payback",
+      "support",
+      "what"
+    ],
+    "texts.rollout.item": [
+      "label",
+      "what"
+    ],
+    "texts.rollout.payback": [
+      "money",
+      "months"
+    ],
+    "texts.rollout.support": [
+      "high",
+      "low"
+    ],
+    "texts.routine.figures": [
+      "cost_month",
+      "cost_year",
+      "hours",
+      "hours_year",
+      "people",
+      "rate"
+    ],
+    "texts.routine.head": [
+      "ops",
+      "per_person",
+      "share",
+      "sphere",
+      "who"
+    ],
+    "texts.routine.item": [
+      "detail",
+      "hours",
+      "label"
+    ],
+    "texts.savings.head": [
+      "after",
+      "freed",
+      "freed_pct",
+      "hours",
+      "money_month",
+      "money_year",
+      "names",
+      "pct",
+      "saved",
+      "saved_year"
+    ],
+    "texts.savings.top_item": [
+      "detail",
+      "hours",
+      "label"
+    ],
+    "texts.savings.top_title": [],
+    "texts.stale": [],
+    "texts.start_hint": [],
+    "texts.team.body": [
+      "people",
+      "roles"
+    ],
+    "texts.team.pair": [
+      "count",
+      "label"
+    ],
+    "texts.team.self": [],
+    "texts.tools.fire_item": [
+      "i",
+      "label"
+    ],
+    "texts.tools.footer": [
+      "hours"
+    ],
+    "texts.tools.hint": [],
+    "texts.tools.item": [
+      "i",
+      "label",
+      "mark",
+      "pct"
+    ],
+    "texts.tools.title": [],
+    "texts.unknown_button": []
+  }
+}

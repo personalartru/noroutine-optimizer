@@ -13,6 +13,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 
 WORKDIR = tempfile.mkdtemp(prefix="max-bot-test-")
 os.chdir(WORKDIR)
@@ -466,6 +467,21 @@ reset()
 click("opt:p:report")
 results.append(check("повтор той же кнопки не перезагружает файл", len(UP) == 2))
 
+# Тот же отчёт, собранный заново, обязан дать ровно те же байты: транспорт
+# кэширует загрузку по хэшу файла, а fpdf2 без фиксированной даты пишет в
+# /CreationDate текущую секунду — и второй клик грузил бы дубликат.
+state = session_of() or {}
+report = optimizer.report_data(state, state.get("calc") or {}, state.get("sav") or {}) \
+    if state.get("calc") and state.get("sav") else None
+if report:
+    time.sleep(1.1)
+    again = optimizer.report_data(state, state["calc"], state["sav"])
+    results.append(check("одинаковый отчёт даёт одинаковые байты PDF",
+                         max_bot.report_bytes(report) == max_bot.report_bytes(again)))
+else:
+    results.append(check("одинаковый отчёт даёт одинаковые байты PDF", False,
+                         "в сессии нет готового расчёта"))
+
 # кнопка «Полный отчёт (PDF)» живёт и под закрытой заявкой: регресс на «сессия
 # очищена» — клик давал «сначала пройдём шаги» вместо файла
 del UP[:]
@@ -518,6 +534,77 @@ max_bot.requests = real_requests
 saved, max_bot.TOKEN = max_bot.TOKEN, ""
 results.append(check("без MAX_BOT_TOKEN main() возвращает 2", max_bot.main() == 2))
 max_bot.TOKEN = saved
+
+# 14. Контент из админки: файл в репозитории валиден, а правка доходит до чата.
+#
+# Админка не трогает код — она коммитит content.json. Значит у прод-цикла два
+# обязательства: файл не должен быть битым (иначе бот молча вернётся к
+# код-дефолтам), и строка из файла должна оказаться в доставленном сообщении.
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+import content  # noqa: E402
+
+wf = open(os.path.join(REPO, ".github", "workflows", "run-optimizer.yml"),
+          encoding="utf-8").read()
+results.append(check("контент в репозитории загружен без предупреждений",
+                     content.warnings() == [], str(content.warnings()[:2])))
+results.append(check("в боевом content.json нет чужих переменных",
+                     content.problems() == [], str(content.problems()[:2])))
+results.append(check("workflow перезапускает цикл на правку контента",
+                     "content.json" in wf and "content.py" in wf))
+src_bot = open(os.path.join(REPO, "max_bot.py"), encoding="utf-8").read()
+results.append(check("цикл печатает, откуда взялся контент",
+                     "source_summary()" in src_bot and "problems()" in src_bot))
+
+
+def run_flow(user):
+    """Пользовательский путь до финала: нужен дважды — до оверлея и после него."""
+    del SENT[:]
+    for payload in ["opt:start"] + FLOW:
+        click(payload, user=user, callback_id="cb14")
+    return max_bot.session_for(user) or {}
+
+
+baseline = run_flow(USER2)
+
+overlay_file = os.path.join(tempfile.mkdtemp(), "content.json")
+MARKER = "ЗАМЕНА-ИЗ-АДМИНКИ: шесть вопросов и готовый расчёт"
+with open(overlay_file, "w", encoding="utf-8") as fh:
+    # Без {переменных}: подстановку проверяет check_content.py, здесь важно
+    # увидеть именно строку админки в доставленном сообщении.
+    json.dump({"schema": content.SCHEMA, "texts": {"intro": MARKER},
+               "buttons": {"reset": "🔄 ЗАМЕНА-ЗАНОВО"}}, fh, ensure_ascii=False)
+
+saved_file, content.CONTENT_FILE = content.CONTENT_FILE, overlay_file
+content.reload()
+optimizer.refresh_catalog()
+del SENT[:]
+max_bot.handle_bot_started({"user": {"user_id": USER2, "name": "Павел"},
+                            "chat_id": DIALOG2})
+results.append(check("правка текста из content.json доходит до чата",
+                     any(MARKER in t for t in texts_to(DIALOG2)),
+                     str(texts_to(DIALOG2)[:1])))
+# «Сброс» появляется на шаге выбора людей: на шаге сфер кнопок-действий нет.
+click("opt:s:it", user=USER2, callback_id="cb15")
+results.append(check("правка подписи кнопки видна в клавиатуре",
+                     content.label("reset") == "🔄 ЗАМЕНА-ЗАНОВО"
+                     and any(b.get("payload") == "opt:reset"
+                             and b["text"] == "🔄 ЗАМЕНА-ЗАНОВО"
+                             for b in all_buttons(DIALOG2))))
+after = run_flow(USER2)
+results.append(check("расчёт не зависит от формулировок",
+                     baseline.get("calc") == after.get("calc")
+                     and baseline.get("sav") == after.get("sav"),
+                     str([(baseline.get("calc") or {}).get("hours"),
+                          (after.get("calc") or {}).get("hours")])))
+results.append(check("оверлей не сломал клавиатуру (у всех кнопок есть type)",
+                     all(b.get("type") in ("callback", "link")
+                         for b in all_buttons(DIALOG2))))
+
+content.CONTENT_FILE = saved_file
+content.reload()
+optimizer.refresh_catalog()
+results.append(check("после съёма оверлея возвращаемся к боевому файлу",
+                     content.text("intro") != MARKER and content.warnings() == []))
 
 print(f"\n{sum(results)}/{len(results)} проверок пройдено")
 sys.exit(0 if all(results) else 1)

@@ -17,6 +17,13 @@
 хранение состояния делает max_bot.py. Благодаря этому флоу прогоняется
 локально без токена: ``python tools/simulate_optimizer.py``.
 
+Формулировки, подписи кнопок и каталог (сферы, роли, ставки, рутина,
+инструменты, чек-лист) — не здесь, а в content.py, который поверх кодовых
+дефолтов накладывает content.json. Админка правит именно JSON и коммитит его в
+main; следующий круг Actions делает checkout и подхватывает правку. Здесь
+остаётся логика: порядок шагов, валидация ответов и арифметика расчёта — то,
+что нельзя отдать свободному тексту, иначе цифры начнут врать.
+
 Методика расчёта: часы рутины × фактор инструмента. Факторы (chat 0.65,
 agent 0.85, n8n 0.75, tracker 0.5, full 0.9) складываются как независимые
 события: непокрытая доля = произведение (1 − f), с потолком 92%. Ставка —
@@ -27,246 +34,54 @@ import os
 import re
 import time
 
+import content
+
 # Финальный шаг, кроме заявки, ведёт читателя в канал про автоматизацию —
-# там выходят разборы и готовые связки. Ссылку можно переназначить переменной
-# окружения MAX_CHANNEL_URL, не трогая код.
-CHANNEL_URL = os.environ.get("MAX_CHANNEL_URL", "https://max.ru/channel_noroutine")
+# там выходят разборы и готовые связки. Ссылка правится в content.json, а
+# переменная окружения MAX_CHANNEL_URL по-прежнему сильнее файла: её задаёт
+# workflow, и деплой не может случайно показать старую ссылку.
+CHANNEL_URL = content.channel_url()
 
 SESSION_TTL = 40 * 60          # без действий сессия сбрасывается
 MAX_HEADCOUNT = 300            # потолок для ручного ввода
 TEXT_CHUNK = 900               # запас под лимит длины сообщения в MAX
 WORK_HOURS = 160               # рабочих часов в месяце на человека
 
-SELF_ROLE = {"label": "Я сам (руковожу и делаю руками)", "salary": 120000}
-
-SPHERES = [
-    {
-        "id": "agency",
-        "label": "Digital / агентство",
-        "blurb": "брифы, правки и отчёты по проектам живут в чатах и почте",
-        "roles": [
-            {"id": "account", "label": "Аккаунт-менеджер", "salary": 90000},
-            {"id": "copy", "label": "Копирайтер", "salary": 70000},
-            {"id": "target", "label": "Таргетолог", "salary": 100000},
-            {"id": "design", "label": "Дизайнер", "salary": 85000},
-        ],
-        "ops": [
-            {"id": "brief", "label": "Сбор брифов и ТЗ", "hours": 20,
-             "detail": "один и тот же шаблон, правки клиента по кругу"},
-            {"id": "client", "label": "Переписка с клиентами", "hours": 22,
-             "detail": "вопросы про статус, сроки и стоимость заново каждый раз"},
-            {"id": "track", "label": "Контроль задач и сроков", "hours": 18,
-             "detail": "обход трекера, напоминания исполнителям"},
-            {"id": "report", "label": "Отчёты по проектам и часам", "hours": 14,
-             "detail": "выгрузки, сведение в таблицу, график для клиента"},
-            {"id": "assets", "label": "Передача макетов и материалов", "hours": 10,
-             "detail": "поиск файлов, ссылки, права доступа"},
-            {"id": "invoice", "label": "Счета и закрывающие документы", "hours": 10,
-             "detail": "по заявкам, отправка, загрузка в учётную систему"},
-        ],
-    },
-    {
-        "id": "ecom",
-        "label": "E-commerce",
-        "blurb": "карточки, отгрузки, отзывы и отчёты каждый день одними и теми же руками",
-        "roles": [
-            {"id": "support", "label": "Оператор поддержки", "salary": 60000},
-            {"id": "orders", "label": "Менеджер заказов", "salary": 75000},
-            {"id": "content", "label": "Контент-менеджер", "salary": 65000},
-            {"id": "market", "label": "Менеджер маркетплейсов", "salary": 90000},
-        ],
-        "ops": [
-            {"id": "cards", "label": "Заполнение и обновление карточек", "hours": 22,
-             "detail": "описания, характеристики, фото, цены по регламенту"},
-            {"id": "reviews", "label": "Ответы на отзывы и вопросы", "hours": 18,
-             "detail": "шаблоны, модерация, отработка негатива"},
-            {"id": "stock", "label": "Сверка остатков и заказов", "hours": 20,
-             "detail": "обход кабинетов, таблички, поиск расхождений"},
-            {"id": "ship", "label": "Оформление отгрузок и возвратов", "hours": 16,
-             "detail": "перенос данных из заявок в учётную систему, документы"},
-            {"id": "price", "label": "Контроль цен и конкурентов", "hours": 12,
-             "detail": "ежедневной ручной мониторинг листов и кабинетов"},
-            {"id": "report", "label": "Отчётность по продажам", "hours": 14,
-             "detail": "выгрузки из кабинетов, сведение в таблицу, график"},
-        ],
-    },
-    {
-        "id": "it",
-        "label": "IT / продукт",
-        "blurb": "фидбек, баг-репорты, бэклог и метрики разлетаются по чатам",
-        "roles": [
-            {"id": "l1", "label": "L1-поддержка", "salary": 65000},
-            {"id": "analyst", "label": "Аналитик", "salary": 130000},
-            {"id": "qa", "label": "Тестировщик", "salary": 110000},
-            {"id": "pm", "label": "Проджект-менеджер", "salary": 145000},
-        ],
-        "ops": [
-            {"id": "feedback", "label": "Разбор фидбека и баг-репортов", "hours": 20,
-             "detail": "чаты, почта, сториз — перенос в задачу с деталями"},
-            {"id": "backlog", "label": "Ведение бэклога и задач", "hours": 16,
-             "detail": "ручные апдейты статусов, приоритеты, комментарии"},
-            {"id": "metrics", "label": "Сбор метрик и отчётов", "hours": 14,
-             "detail": "запросы, выгрузки, сведение в дашборд вручную"},
-            {"id": "onboard", "label": "Онбординг и дожим клиентов", "hours": 15,
-             "detail": "шаблонные письма, контроль шагов, напоминания"},
-            {"id": "ticket", "label": "Контроль тикетов и статусов", "hours": 12,
-             "detail": "обход очереди, эскалации, ответы «где моя задача»"},
-            {"id": "release", "label": "Релизные заметки и комментарии", "hours": 8,
-             "detail": "сбор изменений, тексты, рассылка"},
-        ],
-    },
-    {
-        "id": "production",
-        "label": "Производство",
-        "blurb": "заявки, склад, смены и документы сходятся в одну таблицу у одного человека",
-        "roles": [
-            {"id": "dispatch", "label": "Диспетчер", "salary": 70000},
-            {"id": "supply", "label": "Менеджер закупок", "salary": 100000},
-            {"id": "store", "label": "Кладовщик", "salary": 60000},
-            {"id": "master", "label": "Мастер смены", "salary": 95000},
-        ],
-        "ops": [
-            {"id": "orders", "label": "Приём и распределение заявок", "hours": 20,
-             "detail": "телефон, чат, таблица — и снова по кругу"},
-            {"id": "stock", "label": "Сверка остатков на складе", "hours": 18,
-             "detail": "пересчёт, поиск расхождений, акты"},
-            {"id": "plan", "label": "Планирование смен и загрузки", "hours": 14,
-             "detail": "ручная расстановка людей и заказов по дням"},
-            {"id": "doc", "label": "Накладные, акты и ТТН", "hours": 12,
-             "detail": "заполнение, печать, отправка контрагентам"},
-            {"id": "supply", "label": "Контроль поставок и оплат", "hours": 12,
-             "detail": "напоминания поставщикам, сверка документов"},
-            {"id": "report", "label": "Отчёты по простоям и браку", "hours": 10,
-             "detail": "выгрузка из учётки, сведение в таблицу"},
-        ],
-    },
-    {
-        "id": "services",
-        "label": "Услуги / бьюти",
-        "blurb": "запись, напоминания и ответы в мессенджерах отнимают весь день у администратора",
-        "roles": [
-            {"id": "admin", "label": "Администратор", "salary": 55000},
-            {"id": "dispatch", "label": "Диспетчер заявок", "salary": 65000},
-            {"id": "content", "label": "Контент-менеджер", "salary": 60000},
-            {"id": "market", "label": "Маркетолог", "salary": 95000},
-        ],
-        "ops": [
-            {"id": "record", "label": "Запись и переносы клиентов", "hours": 22,
-             "detail": "телефон, WhatsApp, календарь — одно и то же по десять раз"},
-            {"id": "chat", "label": "Ответы в мессенджерах и звонки", "hours": 20,
-             "detail": "прайс, свободные окна, адрес, как записаться"},
-            {"id": "remind", "label": "Напоминания о визите", "hours": 14,
-             "detail": "ручная рассылка накануне, подтверждение"},
-            {"id": "revenue", "label": "Отчёт по выручке и загрузке", "hours": 10,
-             "detail": "выгрузка из CRM, сведение в таблицу"},
-            {"id": "social", "label": "Посты и сторис по шаблону", "hours": 10,
-             "detail": "одинаковые рубрики, ручная публикация"},
-            {"id": "supply", "label": "Закупка расходников", "hours": 8,
-             "detail": "остатки, заявка поставщику, сверка"},
-        ],
-    },
-    {
-        "id": "finance",
-        "label": "Финансы / учёт",
-        "blurb": "первичка, платежи и сверки приходят каждый день и каждый день их кто-то ищет руками",
-        "roles": [
-            {"id": "account", "label": "Бухгалтер", "salary": 85000},
-            {"id": "check", "label": "Оператор сверок", "salary": 65000},
-            {"id": "finman", "label": "Финменеджер", "salary": 130000},
-            {"id": "kadro", "label": "Кадровик", "salary": 70000},
-        ],
-        "ops": [
-            {"id": "primary", "label": "Сбор и сверка первички", "hours": 24,
-             "detail": "почта, ЭДО, папки, поиск недостающих документов"},
-            {"id": "bank", "label": "Разнос платежей и выписок", "hours": 18,
-             "detail": "ручное отнесение, назначения, разбивки"},
-            {"id": "invoice", "label": "Счета, акты и УПД", "hours": 14,
-             "detail": "создание документов по заявкам, отправка клиентам"},
-            {"id": "budget", "label": "Отчёты по расходам и бюджету", "hours": 14,
-             "detail": "выгрузки, сведение план/факта в таблицу"},
-            {"id": "close", "label": "Закрытие периода и реконсиляция", "hours": 16,
-             "detail": "сверки с контрагентами, поиск расхождений"},
-            {"id": "remind", "label": "Напоминания по оплатам", "hours": 10,
-             "detail": "контроль дебиторки, письма и звонки"},
-        ],
-    },
-    {
-        "id": "marketing",
-        "label": "Маркетинг",
-        "blurb": "заявки приходят из пяти источников, и каждую кто-то открывает, копирует и прозванивает",
-        "roles": [
-            {"id": "target", "label": "Таргетолог", "salary": 100000},
-            {"id": "smm", "label": "SMM-менеджер", "salary": 70000},
-            {"id": "content", "label": "Контент-менеджер", "salary": 65000},
-            {"id": "analyst", "label": "Маркетинговый аналитик", "salary": 120000},
-        ],
-        "ops": [
-            {"id": "leads", "label": "Разбор заявок из форм и чатов", "hours": 24,
-             "detail": "открыть почту или таблицу, перенести в CRM, поставить статус"},
-            {"id": "crm", "label": "Перенос лидов между системами", "hours": 16,
-             "detail": "копирование полей, дедупликация, ручные комментарии"},
-            {"id": "camp", "label": "Сбор отчётов по кампаниям", "hours": 14,
-             "detail": "выгрузки из кабинетов, сведение CPL/ДРР в таблицу"},
-            {"id": "social", "label": "Ответы в комментах и директе", "hours": 15,
-             "detail": "одни и те же вопросы про цену, сроки, адрес"},
-            {"id": "brief", "label": "ТЗ креативам и подрядчикам", "hours": 12,
-             "detail": "повторяющиеся брифы, правки, контроль сроков"},
-            {"id": "pay", "label": "Контроль оплат и документов", "hours": 10,
-             "detail": "сверка актов, напоминания, загрузка в учётную систему"},
-        ],
-    },
-]
-
-TOOLS = [
-    {"id": "chat", "label": "Чат-бот", "factor": 0.65,
-     "impl": (60000, 150000), "support": (8000, 15000),
-     "what": "бот закрывает повторяющиеся обращения и заявки: отвечает по "
-             "сценариям, собирает данные и кладёт их туда, где нужно",
-     "pilot": "перевести 5–10 самых частых вопросов на сценарии бота"},
-    {"id": "agent", "label": "AI-агент", "factor": 0.85,
-     "impl": (90000, 250000), "support": (15000, 30000),
-     "what": "модель читает входящее сообщение или документ, понимает смысл, "
-             "готовит черновик ответа и передаёт человеку только спорное",
-     "pilot": "автоответы и суммаризация обращений с проверкой человеком"},
-    {"id": "n8n", "label": "n8n-воркфлоу", "factor": 0.75,
-     "impl": (40000, 120000), "support": (5000, 12000),
-     "what": "связки между системами: заявка → задача → уведомление → отчёт, "
-             "без копирования поля из окна в окно",
-     "pilot": "сквозная связка «источник → система → уведомление»"},
-    {"id": "tracker", "label": "Интеграция Яндекс Трекер", "factor": 0.5,
-     "impl": (30000, 90000), "support": (4000, 10000),
-     "what": "задачи создаются сами: из форм, чатов и писем, с полями, "
-             "исполнителем и автоматическими статусами",
-     "pilot": "вебхук на создание задач плюс автоназначение и уведомления"},
-    {"id": "full", "label": "Комплексная автоматизация", "factor": 0.9,
-     "impl": (200000, 500000), "support": (25000, 50000),
-     "what": "контур процесса целиком: бот + воркфлоу + трекер + дашборды, "
-             "человек остаётся только на исключениях",
-     "pilot": "один процесс от входа заявки до отчёта, потом тираж на соседние"},
-]
-
-FIRE_TOOL = {"id": "fire", "label": "Уволить всех 🙂", "factor": 1.0,
-             "what": "радикальный метод, который мы не рекомендуем"}
-
-ALL_TOOLS = TOOLS + [FIRE_TOOL]
-
-DISCLAIMER = (
-    "<b>Дисклеймер.</b> Расчёт ориентировочный: часы и ставки — из ваших ответов "
-    "и средних по рынку, бюджет — типовой диапазон. Не оферта и не гарантия "
-    "экономии; точная оценка — после разбора процесса."
-)
+# Каталог и формулировки живут в content.py (и переопределяются content.json),
+# здесь остаются только алиасы: на них смотрит код расчёта, а tools/*.py — на
+# optimizer.SPHERES / optimizer.ALL_TOOLS.
+SELF_ROLE = content.self_role()
+SPHERES = content.spheres()
+TOOLS = content.tools()
+ALL_TOOLS = content.all_tools()
 
 # Кнопки количества: 1–5 отдельными кнопками, дальше диапазоны-оценки.
-# Подписи и payload'ы, клавиатуру собирает keyboard_count() через btn() —
+# Подписи и payload'ы — в контенте, клавиатуру собирает keyboard_count() —
 # без поля "type" MAX молча выбрасывает клавиатуру целиком.
-COUNT_BUTTONS = [
-    [("1", "opt:c:1"), ("2", "opt:c:2"), ("3", "opt:c:3"),
-     ("4", "opt:c:4"), ("5", "opt:c:5")],
-    [("6–10", "opt:c:8"), ("11–25", "opt:c:18")],
-    [("Своё число", "opt:c:x")],
-]
+COUNT_BUTTONS = content.count_buttons()
 # диапазоны считаем по середине оценки
-COUNT_RANGE = {"opt:c:8": 8, "opt:c:18": 18}
+COUNT_RANGE = content.count_range()
+
+
+def refresh_catalog():
+    """Перечитать каталог и ссылку канала после content.reload().
+
+    В проде функция не нужна: каждый круг Actions — свежий процесс, и алиасы
+    выше заполняются на импорте уже с наложенным content.json. Она для тех, кто
+    меняет файл на лету: чекеры прогоняют битый и отредактированный оверлей, не
+    перезапуская питон, и админка-предпросмотр рисует клавиатуру из правленого
+    каталога. Без этого шага optimizer.SPHERES остался бы прошлогодним, и правка
+    подписи сферы «не применилась бы» — ровно то, что чекер обязан поймать.
+    """
+    global CHANNEL_URL, SELF_ROLE, SPHERES, TOOLS, ALL_TOOLS
+    global COUNT_BUTTONS, COUNT_RANGE
+    CHANNEL_URL = content.channel_url()
+    SELF_ROLE = content.self_role()
+    SPHERES = content.spheres()
+    TOOLS = content.tools()
+    ALL_TOOLS = content.all_tools()
+    COUNT_BUTTONS = content.count_buttons()
+    COUNT_RANGE = content.count_range()
 
 
 # ── Мелкие утилиты ───────────────────────────────────────────────────────────
@@ -401,18 +216,17 @@ def headcount(session):
     return sum(role["count"] for role in session["roles"])
 
 
-PEOPLE_FORMS = ("человек", "человека", "человек")
-
-
 def roles_summary(session):
     """Один человек — «вы сами»; команда — «роль × сколько»."""
     if session.get("mode") == "self":
-        return "вы один, всё на вас"
-    return ", ".join(f"{esc(r['label'])} × {r['count']}" for r in session["roles"])
+        return content.text("team.self")
+    return ", ".join(content.text("team.pair", label=esc(r["label"]), count=r["count"])
+                     for r in session["roles"])
 
 
 def people_phrase(count):
-    return f"{count} {plural(count, PEOPLE_FORMS)}"
+    return content.text("people_phrase", count=count,
+                        word=plural(count, content.words("people")))
 
 
 def blended_rate(session):
@@ -481,13 +295,19 @@ def compute_savings(session, calc):
 
 
 # ── Клавиатуры ───────────────────────────────────────────────────────────────
+def mark(on):
+    """Отметка «галочка/пусто» перед подписью кнопки — тоже текст из контента."""
+    return content.label("marks.on" if on else "marks.off")
+
+
 def keyboard_sphere():
     return [[btn(s["label"], f"opt:s:{s['id']}")] for s in SPHERES]
 
 
 def keyboard_mode():
-    return [[btn("Только я", "opt:m:self"), btn("Несколько человек", "opt:m:team")],
-            [btn("🔄 Начать заново", "opt:reset")]]
+    return [[btn(content.label("mode.self"), "opt:m:self"),
+             btn(content.label("mode.team"), "opt:m:team")],
+            [btn(content.label("reset"), "opt:reset")]]
 
 
 def keyboard_roles(session):
@@ -495,11 +315,13 @@ def keyboard_roles(session):
     sphere = sphere_by_id(session.get("sphere")) or SPHERES[0]
     rows = []
     for i, role in enumerate(sphere["roles"]):
-        mark = "✅" if i in session.get("role_pick", []) else "▫️"
-        rate = money(hour_rate(role["salary"]))
-        rows.append([btn(f"{mark} {role['label']} · {rate}/ч", f"opt:r:{i}")])
-    rows.append([btn("Сколько их?", "opt:r:ok"), btn("Сбросить выбор", "opt:r:clear")])
-    rows.append([btn("🔄 Начать заново", "opt:reset")])
+        rows.append([btn(content.label("roles.item", mark=mark(i in session.get("role_pick", [])),
+                                      label=role["label"],
+                                      rate=money(hour_rate(role["salary"]))),
+                         f"opt:r:{i}")])
+    rows.append([btn(content.label("roles.ok"), "opt:r:ok"),
+                 btn(content.label("roles.clear"), "opt:r:clear")])
+    rows.append([btn(content.label("reset"), "opt:reset")])
     return rows
 
 
@@ -510,19 +332,21 @@ def keyboard_count():
 
 def keyboard_more():
     """Клавиатура для старых сообщений: там шаг 2 был по одной специальности."""
-    return [[btn("Добавить специальность", "opt:n:more")],
-            [btn("Считаем рутину", "opt:n:calc")],
-            [btn("🔄 Начать заново", "opt:reset")]]
+    return [[btn(content.label("more.add"), "opt:n:more")],
+            [btn(content.label("more.calc"), "opt:n:calc")],
+            [btn(content.label("reset"), "opt:reset")]]
 
 
 def keyboard_ops(session):
     sphere = sphere_by_id(session.get("sphere")) or SPHERES[0]
     rows = []
-    for i, op in enumerate(sphere["ops"]):
-        mark = "✅" if op["id"] in session["ops"] else "▫️"
-        rows.append([btn(f"{mark} {op['label']} · {op['hours']} ч", f"opt:o:{op['id']}")])
-    rows.append([btn("Посчитать рутину", "opt:o:ok"), btn("Сбросить выбор", "opt:o:clear")])
-    rows.append([btn("🔄 Начать заново", "opt:reset")])
+    for op in sphere["ops"]:
+        rows.append([btn(content.label("ops.item", mark=mark(op["id"] in session["ops"]),
+                                      label=op["label"], hours=op["hours"]),
+                         f"opt:o:{op['id']}")])
+    rows.append([btn(content.label("ops.ok"), "opt:o:ok"),
+                 btn(content.label("ops.clear"), "opt:o:clear")])
+    rows.append([btn(content.label("reset"), "opt:reset")])
     return rows
 
 
@@ -532,250 +356,194 @@ def keyboard_tools_marked(session):
         if tool["id"] == "fire":
             rows.append([btn(tool["label"], "opt:t:fire")])
             continue
-        mark = "✅" if tool["id"] in session["tools"] else "▫️"
-        rows.append([btn(f"{mark} {tool['label']}", f"opt:t:{tool['id']}")])
-    rows.append([btn("Показать экономию", "opt:t:ok"), btn("Сбросить", "opt:t:clear")])
-    rows.append([btn("🔄 Начать заново", "opt:reset")])
+        rows.append([btn(content.label("tools.item",
+                                       mark=mark(tool["id"] in session["tools"]),
+                                       label=tool["label"]),
+                         f"opt:t:{tool['id']}")])
+    rows.append([btn(content.label("tools.ok"), "opt:t:ok"),
+                 btn(content.label("tools.clear"), "opt:t:clear")])
+    rows.append([btn(content.label("reset"), "opt:reset")])
     return rows
 
 
 def keyboard_final():
-    return [[btn("📄 Полный отчёт (PDF)", "opt:p:report")],
-            [btn("💬 Отправить заявку", "opt:fb")],
-            [btn("Пройти заново", "opt:again")]]
+    return [[btn(content.label("final.pdf"), "opt:p:report")],
+            [btn(content.label("final.lead"), "opt:fb")],
+            [btn(content.label("final.again"), "opt:again")]]
+
+
+def keyboard_after_lead():
+    """После заявки расчёт всё ещё жив — кнопка отчёта остаётся нужной."""
+    return [[btn(content.label("final.pdf"), "opt:p:report")],
+            [btn(content.label("after_lead.again"), "opt:again")],
+            [{"type": "link", "text": content.label("after_lead.channel"),
+              "url": CHANNEL_URL}]]
 
 
 # ── Тексты ───────────────────────────────────────────────────────────────────
+# Каждый текст берётся из контента по ключу и подставляется именованными
+# переменными. Формат числа — ответственность кода (money/fmt/plural): иначе
+# админка случайно рассинхронизирует «383 726 ₽» в чате и в PDF.
 def text_intro():
-    return (
-        "Оптимизатор — бот, который помогает оптимизировать ваши рабочие процессы.\n\n"
-        "Шесть коротких вопросов. На выходе: часы рутины, их стоимость, экономия "
-        "и чек-лист внедрения.\n\n<b>Шаг 1 из 6 · Сфера деятельности</b>"
-    )
+    return content.text("intro")
 
 
 def text_mode(session):
-    return (
-        f"<b>{esc(session['sphere_label'])}</b> — принято.\n\n"
-        "<b>Шаг 2 из 6 · Кого оптимизируем?</b>\n"
-        "Вся рутина на вас — жмите «Только я»."
-    )
+    return content.text("mode.body", sphere=esc(session["sphere_label"]))
 
 
 def text_roles(session):
     sphere = sphere_by_id(session.get("sphere")) or SPHERES[0]
     picked = [capital(sphere["roles"][i]["label"])
               for i in sorted(session.get("role_pick") or []) if i < len(sphere["roles"])]
-    lines = [
-        "<b>Шаг 2 из 6 · Отметьте специалистов</b>",
-        "",
-        "Можно несколько галочек — потом спрошу, сколько человек в каждой роли.",
-    ]
+    lines = [content.text("roles.title"), "", content.text("roles.hint")]
     if picked:
-        lines += ["", "Отмечено: " + ", ".join(esc(x) for x in picked) + "."]
+        lines += ["", content.text("roles.picked",
+                                   picked=", ".join(esc(x) for x in picked))]
     return "\n".join(lines)
 
 
 def text_count(session):
     role = session["pending_role"]
     left = len(session.get("role_queue") or [])
-    further = f" Дальше ещё {plural(left, ('роль', 'роли', 'ролей'))}." if left else ""
-    return (
-        f"<b>{esc(role['label'])}</b> — сколько таких?\n"
-        f"Ставка {money(role['rate'])}/ч.{further}\n"
-        "Кнопки 1–5, «6–10», «11–25» — или число сообщением."
-    )
+    further = ""
+    if left:
+        further = content.text("count.left", n=left,
+                               word=plural(left, content.words("roles")))
+    return content.text("count.body", role=esc(role["label"]),
+                        rate=money(role["rate"]), further=further)
 
 
 def text_team(session):
-    roles = ", ".join(f"{esc(r['label'])} × {r['count']}" for r in session["roles"])
-    return f"Команда: {roles}.\nВ расчёте <b>{people_phrase(headcount(session))}</b>."
+    roles = ", ".join(content.text("team.pair", label=esc(r["label"]), count=r["count"])
+                      for r in session["roles"])
+    return content.text("team.body", roles=roles,
+                        people=people_phrase(headcount(session)))
 
 
 def text_ops(session):
     sphere = sphere_by_id(session.get("sphere")) or SPHERES[0]
     total = sum(op["hours"] for op in sphere["ops"] if op["id"] in session["ops"])
-    lines = [
-        "<b>Шаг 3 из 6 · Что повторяете руками?</b>",
-        "",
-        "Отмечайте повторы, тап ещё раз — снять отметку.",
-        "",
-    ]
+    lines = [content.text("ops.title"), "", content.text("ops.hint"), ""]
     for i, op in enumerate(sphere["ops"], start=1):
-        mark = "✅" if op["id"] in session["ops"] else "▫️"
-        lines.append(f"{mark} {i}. {esc(op['label'])} · {op['hours']} ч/мес")
+        lines.append(content.text("ops.item", mark=mark(op["id"] in session["ops"]),
+                                  i=i, label=esc(op["label"]), hours=op["hours"]))
     n = len(session["ops"])
-    lines += ["", f"Отмечено {n} {plural(n, ('операция', 'операции', 'операций'))} — "
-                  f"<b>{total} ч/мес</b> на человека."]
+    lines += ["", content.text("ops.footer", n=n, hours=total,
+                               word=plural(n, content.words("ops")))]
     return "\n".join(lines)
 
 
 def text_tools(session, calc):
-    lines = [
-        "<b>Шаг 5 из 6 · Чем убираем рутину?</b>",
-        "",
-        "Отметьте то, что реально рассматриваете — можно несколько, эффекты складываются.",
-        "",
-    ]
+    lines = [content.text("tools.title"), "", content.text("tools.hint"), ""]
     for i, tool in enumerate(ALL_TOOLS):
         if tool["id"] == "fire":
-            lines.append(f"▫️ {i + 1}. {esc(tool['label'])} — в расчёт не пойдёт")
+            lines.append(content.text("tools.fire_item", i=i + 1,
+                                      label=esc(tool["label"])))
             continue
-        mark = "✅" if tool["id"] in session["tools"] else "▫️"
-        lines.append(f"{mark} {i + 1}. {esc(tool['label'])} — до "
-                     f"{int(round(tool['factor'] * 100))}% времени рутины")
-    lines += ["", f"Рутины сейчас: <b>{fmt(calc['hours'])} ч/мес</b>."]
+        lines.append(content.text("tools.item", mark=mark(tool["id"] in session["tools"]),
+                                  i=i + 1, label=esc(tool["label"]),
+                                  pct=int(round(tool["factor"] * 100))))
+    lines += ["", content.text("tools.footer", hours=fmt(calc["hours"]))]
     return "\n".join(lines)
 
 
 def text_routine(session, calc):
-    ops = "\n".join(f"• {esc(op['label'])} — <b>{op['hours']} ч/мес</b> на человека "
-                     f"({esc(op['detail'])})" for op in calc["ops"])
+    ops = "\n".join(content.text("routine.item", label=esc(op["label"]),
+                                 hours=op["hours"], detail=esc(op["detail"]))
+                    for op in calc["ops"])
     return [
-        (
-            "<b>Шаг 4 из 6 · Что получилось</b>\n\n"
-            f"{esc(calc['sphere_label'])}, {roles_summary(session)}. "
-            f"Повторов — <b>{calc['per_person']} ч/мес на человека</b>, "
-            f"это ~{calc['share']}% месяца.\n\n"
-            f"Операции в расчёте:\n{ops}"
-        ),
-        (
-            f"<b>Часы рутины:</b> {fmt(calc['hours'])} ч/мес на "
-            f"{people_phrase(calc['people'])} · {fmt(calc['hours'] * 12)} ч/год\n"
-            f"<b>Стоимость:</b> ~<b>{money(calc['cost_month'])}/мес</b> по ставке "
-            f"{money(calc['rate'])}/ч · {money(calc['cost_year'])} в год"
-        ),
+        content.text("routine.head", sphere=esc(calc["sphere_label"]),
+                     who=roles_summary(session), per_person=calc["per_person"],
+                     share=calc["share"], ops=ops),
+        content.text("routine.figures", hours=fmt(calc["hours"]),
+                    people=people_phrase(calc["people"]),
+                    hours_year=fmt(calc["hours"] * 12),
+                    cost_month=money(calc["cost_month"]), rate=money(calc["rate"]),
+                    cost_year=money(calc["cost_year"])),
     ]
 
 
 def text_fire(calc):
-    return FIRE_TEXT.replace("{money}", money(calc["cost_month"]))
-
-
-FIRE_TEXT = (
-    "«Уволить всех» — и рутина исчезнет вместе с процессом 🙂\n\n"
-    "<b>Экономия 100% часов: {money}/мес.</b>\n\n"
-    "Минус: вместе с часами уйдут заявки, клиенты и отчётность. Шутка — но ровно "
-    "про масштаб проблемы: рутину надо убирать совсем, а не делать быстрее.\n\n"
-    "В расчёт не беру — отмечайте настоящие инструменты."
-)
+    return content.text("fire.body", money=money(calc["cost_month"]))
 
 
 def text_savings(session, calc, sav):
     names = ", ".join(esc(t["label"]) for t in sav["tools"])
     freed = sav["saved_hours"] / max(1, calc["people"])
     top = "\n".join(
-        f"• {esc(op['label'])} ({op['hours']} ч/мес на человека): {esc(op['detail'])}"
+        content.text("savings.top_item", label=esc(op["label"]), hours=op["hours"],
+                     detail=esc(op["detail"]))
         for op in sorted(calc["ops"], key=lambda o: -o["hours"])[:3])
     return [
-        (
-            "<b>Шаг 6 из 6 · Экономия</b>\n\n"
-            f"<b>Инструменты:</b> {names}\n"
-            f"<b>Забираем:</b> {int(round(sav['factor'] * 100))}% времени рутины "
-            "(потолок честной автоматизации ~92% — исключения всегда остаются)\n\n"
-            f"• Часы: {fmt(calc['hours'])} → {fmt(calc['hours'] - sav['saved_hours'])} "
-            f"ч/мес руками, экономия <b>{fmt(sav['saved_hours'])} ч/мес</b> · "
-            f"{fmt(sav['saved_hours'] * 12)} ч/год\n"
-            f"• Деньги: <b>{money(sav['saved_money'])}/мес</b> · "
-            f"{money(sav['saved_year'])} в год\n"
-            f"• На человека: <b>{fmt(freed)} ч/мес</b> свободно — "
-            f"~{round(freed / WORK_HOURS * 100)}% его месяца"
-        ),
-        "<b>Что освобождается первым:</b>\n" + top,
+        content.text("savings.head", names=names,
+                     pct=int(round(sav["factor"] * 100)),
+                     hours=fmt(calc["hours"]),
+                     after=fmt(calc["hours"] - sav["saved_hours"]),
+                     saved=fmt(sav["saved_hours"]),
+                     saved_year=fmt(sav["saved_hours"] * 12),
+                     money_month=money(sav["saved_money"]),
+                     money_year=money(sav["saved_year"]),
+                     freed=fmt(freed), freed_pct=round(freed / WORK_HOURS * 100)),
+        content.text("savings.top_title") + "\n" + top,
     ]
 
 
+def checklist_values(calc, sav):
+    """Что подставляется в шаблонные поля чек-листа из каталога."""
+    ops = sorted(calc.get("ops") or [], key=lambda o: -o["hours"])
+    first = ops[0]["label"] if ops else content.text("checklist.fallback_first")
+    first_hours = ops[0]["hours"] if ops else 0
+    second = ops[1]["label"] if len(ops) > 1 else content.text("checklist.fallback_second")
+    pilot = (sav["tools"][0]["pilot"] if sav.get("tools")
+             else content.text("checklist.fallback_pilot"))
+    tool_names = (", ".join(t["label"].lower() for t in sav.get("tools", []))
+                  or content.text("checklist.fallback_tools"))
+    return {
+        "first": esc(first),
+        "first_hours": first_hours,
+        "second": esc(second),
+        "pilot": esc(pilot),
+        "tools": esc(tool_names),
+    }
+
+
 def checklist_steps(calc, sav):
-    """Семь шагов внедрения — один источник для чата, PDF и текстового fallback.
+    """Шаги внедрения из каталога — один источник для чата, PDF и текстового fallback.
 
     `short` — одна строка в чате (с эмодзи и сроком), `body` — пояснение, которое
     едет только в PDF: в сообщении оно раздувает финальный экран до трёх
     простыней.
     """
-    ops = sorted(calc.get("ops") or [], key=lambda o: -o["hours"])
-    first = ops[0]["label"] if ops else "повторяющаяся операция"
-    first_hours = ops[0]["hours"] if ops else 0
-    second = ops[1]["label"] if len(ops) > 1 else "соседние операции"
-    pilot = sav["tools"][0]["pilot"] if sav.get("tools") else "переводим шаг в сценарий"
-    tool_names = ", ".join(t["label"].lower() for t in sav.get("tools", [])) or "связки"
-    return [
-        {
-            "emoji": "📝",
-            "title": "Зафиксировать процесс как есть",
-            "short": "Зафиксировать процесс",
-            "body": f"Опишите «{esc(first)}» по шагам: кто начинает, где живут "
-                    "данные, что значит «готово».",
-            "when": "0,5 дня",
-        },
-        {
-            "emoji": "🎯",
-            "title": "Выбрать один пилот",
-            "short": f"Пилот: «{first}» ({first_hours} ч/мес)",
-            "body": f"Берём самое дорогое — «{esc(first)}» ({first_hours} ч/мес на "
-                    f"человека): {esc(pilot)}. Остальное после первого результата.",
-            "when": "1 неделя",
-        },
-        {
-            "emoji": "🔑",
-            "title": "Подготовить данные и доступы",
-            "short": "Данные, доступы, права",
-            "body": "Регламенты, таблицы-источники, API-ключи и права, ответственный "
-                    "за исключения.",
-            "when": "2–3 дня",
-        },
-        {
-            "emoji": "🛠",
-            "title": "Собрать MVP и гонять рядом с руками",
-            "short": "MVP рядом с руками",
-            "body": f"Первая версия ({esc(tool_names)}) работает вместе с человеком: "
-                    "автомат делает, человек правит правила — так находятся крайние "
-                    "случаи.",
-            "when": "1–2 недели",
-        },
-        {
-            "emoji": "📏",
-            "title": "Замерить часы до и после",
-            "short": "Замер до и после",
-            "body": "Сколько уходило и сколько осталось. Только замер отличает "
-                    "«кажется, быстрее» от реальной экономии.",
-            "when": "2 недели",
-        },
-        {
-            "emoji": "🧭",
-            "title": "Передать владельцу и задокументировать",
-            "short": "Ответственный и инструкция",
-            "body": "Кто правит сценарии, куда писать при сбое, как добавить операцию.",
-            "when": "1 день",
-        },
-        {
-            "emoji": "📈",
-            "title": "Тиражировать",
-            "short": f"Тираж: «{second}» и остальное",
-            "body": f"По «{esc(first)}» есть цифра — добавляем «{esc(second)}» и "
-                    "остальное из расчёта: они встают на готовый контур дешевле.",
-            "when": "1–2 недели на операцию",
-        },
-    ]
+    values = checklist_values(calc, sav)
+    steps = []
+    for step in content.checklist():
+        steps.append({
+            "emoji": content.fill(step.get("emoji"), values),
+            "title": content.fill(step.get("title"), values),
+            "short": content.fill(step.get("short"), values),
+            "body": content.fill(step.get("body"), values),
+            "when": content.fill(step.get("when"), values),
+        })
+    return steps
 
 
 def text_checklist(calc, sav):
     """Чек-лист в чате: одна строка на шаг, подробности — в PDF."""
-    steps = checklist_steps(calc, sav)
-    lines = ["<b>Чек-лист внедрения</b>", ""]
-    for i, step in enumerate(steps, start=1):
-        lines.append(f"{i}. {step['emoji']} {step['short']} — <i>{step['when']}</i>")
-    lines.append("")
-    lines.append("Пояснения к каждому шагу, расчёт и бюджет — кнопкой «📄 Полный "
-                 "отчёт (PDF)» ниже.")
+    lines = [content.text("checklist.title"), ""]
+    for i, step in enumerate(checklist_steps(calc, sav), start=1):
+        lines.append(content.text("checklist.item", i=i, emoji=step["emoji"],
+                                  short=step["short"], when=step["when"]))
+    lines += ["", content.text("checklist.hint", pdf=content.label("final.pdf"))]
     return "\n".join(lines).rstrip()
 
 
 def checklist_full_text(calc, sav):
     """Развёрнутый чек-лист сообщением: запасной путь, если PDF не собрался."""
-    lines = ["<b>Чек-лист внедрения — подробно</b>", ""]
+    lines = [content.text("checklist.full_title"), ""]
     for i, step in enumerate(checklist_steps(calc, sav), start=1):
-        lines.append(f"<b>{i}. {step['title']}</b> — {step['body']}"
-                     f"\n   <i>{step['when']}</i>\n")
+        lines.append(content.text("checklist.full_item", i=i, title=step["title"],
+                                  body=step["body"], when=step["when"]) + "\n")
     return "\n".join(lines).rstrip()
 
 
@@ -786,92 +554,111 @@ def strip_html(text):
 
 
 def report_data(session, calc, sav):
-    """Структура для PDF-отчёта: всё уже отформатировано для человека."""
+    """Структура для PDF-отчёта: всё уже отформатировано для человека.
+
+    Подписи разделов уезжают вместе с цифрами — report_pdf.py только рисует и
+    не держит ни одного текстового литерала, иначе правка админки дошла бы до
+    чата, но не до файла.
+    """
     tools = sav.get("tools") or []
     payback = sav.get("payback")
     months = (f"{payback:.1f}".replace(".", ",").rstrip("0").rstrip(",")
               if payback and payback < 10 else
-              (str(int(round(payback))) if payback else "—"))
-    budget = (f"{money(sav.get('impl_low', 0))}–{money(sav.get('impl_high', 0))} разово")
+              (str(int(round(payback))) if payback else content.text("report.none")))
+    none = content.text("report.none")
+    date = time.strftime("%d.%m.%Y")
     support = ""
     if sav.get("support_high"):
-        support = (f"{money(sav['support_low'])}–{money(sav['support_high'])}/мес")
+        support = content.text("report.support_value",
+                               low=money(sav["support_low"]),
+                               high=money(sav["support_high"]))
     return {
-        "title": f"Отчёт оптимизатора · {calc.get('sphere_label') or ''}".strip(),
+        "title": content.text("report.title",
+                              sphere=calc.get("sphere_label") or "").strip(),
         "slug": session.get("sphere") or "",
-        "date": time.strftime("%d.%m.%Y"),
-        "who": roles_summary(session) or "—",
+        "date": date,
+        "who": roles_summary(session) or none,
         "people": fmt(calc.get("people", 1)),
-        "rate": f"{money(calc.get('rate', 0))}/ч",
-        "headline": (f"{fmt(calc.get('hours', 0))} ч/мес рутины · "
-                     f"{money(calc.get('cost_month', 0))}/мес"),
+        "rate": content.text("report.rate", rate=money(calc.get("rate", 0))),
+        "headline": content.text("report.headline", hours=fmt(calc.get("hours", 0)),
+                                 cost=money(calc.get("cost_month", 0))),
         "ops": [{"title": op["label"],
-                 "value": f"{op['hours']} ч/мес",
+                 "value": content.text("report.hours_value", hours=op["hours"]),
                  "note": op.get("detail", "")}
                 for op in sorted(calc.get("ops") or [], key=lambda o: -o["hours"])],
         "figures": [
-            ("Рутина сейчас", f"{fmt(calc.get('hours', 0))} ч/мес"),
-            ("Забираем автоматизацией",
-             f"{int(round((sav.get('factor') or 0) * 100))}%"),
-            ("Экономия", f"{fmt(sav.get('saved_hours', 0))} ч/мес"),
-            ("В деньгах", f"{money(sav.get('saved_money', 0))}/мес · "
-                          f"{money(sav.get('saved_year', 0))}/год"),
-            ("Освобождается на человека",
-             f"{fmt(sav.get('saved_hours', 0) / max(1, calc.get('people', 1)))} ч/мес"),
-            ("Окупаемость", f"~{months} мес"),
+            (content.text("report.figure_routine"),
+             content.text("report.hours_value", hours=fmt(calc.get("hours", 0)))),
+            (content.text("report.figure_take"),
+             content.text("report.percent_value",
+                          pct=int(round((sav.get("factor") or 0) * 100)))),
+            (content.text("report.figure_saving"),
+             content.text("report.hours_value", hours=fmt(sav.get("saved_hours", 0)))),
+            (content.text("report.figure_money"),
+             content.text("report.money_value", money=money(sav.get("saved_money", 0)),
+                          year=money(sav.get("saved_year", 0)))),
+            (content.text("report.figure_freed"),
+             content.text("report.hours_value",
+                          hours=fmt(sav.get("saved_hours", 0)
+                                    / max(1, calc.get("people", 1))))),
+            (content.text("report.figure_payback"),
+             content.text("report.payback_value", months=months)),
         ],
         "tools": [{"title": t["label"],
-                   "value": f"{money(t['impl'][0])}–{money(t['impl'][1])} разово",
+                   "value": content.text("report.tool_value", low=money(t["impl"][0]),
+                                         high=money(t["impl"][1])),
                    "note": t.get("what", "")}
                   for t in tools],
-        "budget": [("Бюджет внедрения", budget), ("Сопровождение", support or "—")],
+        "budget": [(content.text("report.budget_impl"),
+                    content.text("report.impl_value", low=money(sav.get("impl_low", 0)),
+                                 high=money(sav.get("impl_high", 0)))),
+                   (content.text("report.budget_support"), support or none)],
         "steps": [dict(step, num=i) for i, step in enumerate(checklist_steps(calc, sav),
                                                               start=1)],
-        "disclaimer": strip_html(DISCLAIMER),
+        "sections": {
+            "topline": content.text("report.topline", date=date),
+            "people_line": content.text("report.people_line",
+                                        people=fmt(calc.get("people", 1))),
+            "ops": content.text("report.section_ops"),
+            "saving": content.text("report.section_saving"),
+            "tools": content.text("report.section_tools"),
+            "checklist": content.text("report.section_checklist"),
+            "howto": content.text("report.section_howto"),
+            "empty_ops": content.text("report.empty_ops"),
+            "title_fallback": content.text("report.title_fallback"),
+            "channel_line": content.text("report.channel_line", channel=CHANNEL_URL),
+        },
+        "disclaimer": strip_html(content.text("rollout.disclaimer")),
         "channel": CHANNEL_URL,
     }
 
 
 def text_rollout(sav):
-    what = "\n".join(f"• <b>{esc(t['label'])}</b>: {esc(t['what'])}"
+    what = "\n".join(content.text("rollout.item", label=esc(t["label"]),
+                                  what=esc(t["what"]))
                       for t in sav["tools"])
     support = ""
     if sav["support_high"]:
-        support = (f"\n<b>Сопровождение:</b> {money(sav['support_low'])}–"
-                   f"{money(sav['support_high'])}/мес.")
+        support = content.text("rollout.support", low=money(sav["support_low"]),
+                               high=money(sav["support_high"]))
     payback = ""
     if sav["payback"]:
         months = sav["payback"]
         pretty = (f"{months:.1f}".replace(".", ",").rstrip("0").rstrip(",")
                   if months < 10 else str(int(round(months))))
-        payback = (f"\nСредний бюджет окупается за <b>~{pretty} мес</b> при экономии "
-                   f"{money(sav['saved_money'])}/мес.")
+        payback = content.text("rollout.payback", months=pretty,
+                               money=money(sav["saved_money"]))
     return [
-        (
-            "<b>Стоимость внедрения</b>\n\n"
-            f"{what}\n\n<b>Примерный бюджет:</b> {money(sav['impl_low'])}–"
-            f"{money(sav['impl_high'])} разово.{support}{payback}"
-        ),
-        DISCLAIMER + "\n\nХотите конкретный план под ваш процесс — отправьте заявку "
-        "кнопкой ниже.",
+        content.text("rollout.head", what=what,
+                     budget=f"{money(sav['impl_low'])}–{money(sav['impl_high'])}",
+                     support=support, payback=payback),
+        content.text("rollout.disclaimer") + content.text("rollout.cta"),
     ]
 
 
-TEXT_FEEDBACK_PROMPT = (
-    "Опишите процесс одним сообщением: что делаете руками, в каких системах, "
-    "сколько это времени. Контакт, если нужен ответ.\n\n"
-    "Перешлю в штаб оптимизации: такие запросы он разбирает сам."
-)
-
-TEXT_FEEDBACK_DONE = (
-    "Отправил в штаб оптимизации вместе с вашим расчётом — обычно отвечаем в "
-    "течение дня.\n\nПересчитать другой процесс — «Оптимизатор заново» ниже."
-)
-
-
 # ── Диспетчер кнопок ─────────────────────────────────────────────────────────
-TEXT_STALE = ("Похоже, это кнопка из прошлого расчёта. "
-              "Нажмите «Начать заново» — пойдём с начала.")
+def text_stale():
+    return content.text("stale")
 
 # шаги, которые бессмысленны без выбранной сферы (кнопки «сфера»/«режим» — нет)
 STALE_GUARDED = {"r", "c", "n", "o", "t"}
@@ -902,23 +689,21 @@ def dispatch(payload, session):
     if kind == "start":
         return start(session)
     if kind == "cancel":
-        return {**session, "step": "done"}, emit(
-            "Оптимизатор остановил. Продолжить — «Начать заново» или /старт.")
+        return {**session, "step": "done"}, emit(content.text("cancel"))
 
     handler = HANDLERS.get(kind)
     if not handler:
-        return session, emit("Не распознал кнопку — нажмите «Начать заново», "
-                             "чтобы начать заново.")
+        return session, emit(content.text("unknown_button"))
     if kind in STALE_GUARDED and is_stale(session):
         # тап по клавиатуре из сброшенного/просроченного расчёта
-        return session, emit(TEXT_STALE)
+        return session, emit(text_stale())
     return handler(session, arg)
 
 
 def on_sphere(session, arg):
     sphere = sphere_by_id(arg)
     if not sphere:
-        return session, emit("Такой сферы нет в списке — выберите из кнопок.")
+        return session, emit(content.text("errors.no_sphere"))
     session.update(sphere=sphere["id"], sphere_label=sphere["label"], mode=None,
                    roles=[], role_pick=[], role_queue=[], pending_role=None,
                    last_role=None, ops=[], tools=[], calc=None, sav=None,
@@ -928,7 +713,7 @@ def on_sphere(session, arg):
 
 def on_mode(session, arg):
     if session["step"] != "mode":
-        return session, emit("Сначала выберите сферу — кнопки выше.")
+        return session, emit(content.text("errors.sphere_first"))
     if arg == "self":
         session["mode"] = "self"
         session["roles"] = [{"label": SELF_ROLE["label"], "count": 1,
@@ -953,8 +738,7 @@ def on_role(session, arg):
     if arg == "ok":
         picks = [i for i in session.get("role_pick") or [] if i < len(sphere["roles"])]
         if not picks:
-            return session, emit("Отметьте хотя бы одного специалиста — кнопки выше, "
-                                 "можно сразу несколько.")
+            return session, emit(content.text("errors.no_role_pick"))
         session["role_queue"] = [{"label": sphere["roles"][i]["label"],
                                   "rate": hour_rate(sphere["roles"][i]["salary"])}
                                  for i in picks]
@@ -962,7 +746,7 @@ def on_role(session, arg):
         return ask_count(session)
     role = role_at(sphere, arg)
     if not role:
-        return session, emit("Специальность не распознана — выберите из списка.")
+        return session, emit(content.text("errors.bad_role"))
     index = sphere["roles"].index(role)
     pick = list(session.get("role_pick") or [])
     pick.remove(index) if index in pick else pick.append(index)
@@ -987,15 +771,13 @@ def on_count(session, arg):
         return on_role(session, "ok") if session.get("role_pick") else start(session)
     if arg == "x":
         session["step"] = "count_text"
-        return session, emit(f"Сколько человек в роли «{esc(role['label'])}»? "
-                             "Напишите число, например 7.")
+        return session, emit(content.text("count.ask", role=esc(role["label"])))
     count = COUNT_RANGE.get(f"opt:c:{arg}")
     if count is None:
         try:
             count = int(arg)
         except ValueError:
-            return session, emit("Не понял количество — выберите кнопку 1–5 "
-                                 "или напишите число сообщением.")
+            return session, emit(content.text("errors.bad_count"))
     record_role(session, role["label"], count, role["rate"])
     session["pending_role"] = None
     return ask_count(session)
@@ -1012,7 +794,7 @@ def record_role(session, label, count, rate):
     else:
         roles.append({"label": label, "count": count, "rate": rate})
     session["roles"] = roles
-    session["last_role"] = f"{label} × {count}"
+    session["last_role"] = content.text("team.pair", label=label, count=count)
 
 
 def counts_done(session):
@@ -1045,21 +827,20 @@ def on_op(session, arg):
     sphere = sphere_by_id(session.get("sphere"))
     if not sphere:
         # кнопка со старого сообщения: сфера уже сбросилась или её не выбирали
-        return session, emit(TEXT_STALE)
+        return session, emit(text_stale())
     if arg == "clear":
         session["ops"] = []
         return session, emit(text_ops(session), keyboard_ops(session))
     if arg == "ok":
         if not session["ops"]:
-            return session, emit("Отметьте хотя бы одну операцию — иначе считать нечего. "
-                                 "Можно начать заново кнопкой внизу.")
+            return session, emit(content.text("errors.no_op_pick"))
         calc = compute_routine(session)
         session["calc"] = calc
         session["step"] = "tools"
         return session, emit(text_routine(session, calc), keyboard_tools_marked(session))
     op = next((o for o in sphere["ops"] if o["id"] == arg), None)
     if not op:
-        return session, emit("Такой операции нет в списке — выберите из кнопок.")
+        return session, emit(content.text("errors.bad_op"))
     ops = list(session["ops"])
     ops.remove(op["id"]) if op["id"] in ops else ops.append(op["id"])
     session["ops"] = ops
@@ -1068,7 +849,7 @@ def on_op(session, arg):
 
 def on_tool(session, arg):
     if session.get("step") not in ("tools", "savings", "rollout"):
-        return session, emit(TEXT_STALE)
+        return session, emit(text_stale())
     calc = session.get("calc") or compute_routine(session)
     session["calc"] = calc
     if arg == "clear":
@@ -1076,13 +857,13 @@ def on_tool(session, arg):
         return session, emit(text_tools(session, calc), keyboard_tools_marked(session))
     if arg == "ok":
         if not session["tools"]:
-            return session, emit("Выберите инструмент 🙂 «Уволить всех» тоже считается.")
+            return session, emit(content.text("errors.no_tool_pick"))
         sav = compute_savings(session, calc)
         session["sav"] = sav
         session["step"] = "savings"
         return session, emit(text_savings(session, calc, sav),
-                             [[btn("Дальше: чек-лист внедрения", "opt:t:plan")],
-                              [btn("Выбрать другие инструменты", "opt:t:back")]])
+                             [[btn(content.label("tools.plan"), "opt:t:plan")],
+                              [btn(content.label("tools.back"), "opt:t:back")]])
     if arg == "plan":
         sav = session.get("sav") or compute_savings(session, calc)
         session["step"] = "rollout"
@@ -1094,7 +875,7 @@ def on_tool(session, arg):
         return session, emit(text_tools(session, calc), keyboard_tools_marked(session))
     tool = tool_by_id(arg)
     if not tool:
-        return session, emit("Такого инструмента нет в списке.")
+        return session, emit(content.text("errors.bad_tool"))
     if tool["id"] == "fire":
         return session, emit(text_fire(calc)) \
             + emit(text_tools(session, calc), keyboard_tools_marked(session))
@@ -1106,7 +887,7 @@ def on_tool(session, arg):
 
 def on_feedback(session, _arg=None):
     session["step"] = "feedback"
-    return session, emit(TEXT_FEEDBACK_PROMPT)
+    return session, emit(content.text("feedback.prompt"))
 
 
 def on_pdf(session, _arg=None):
@@ -1118,14 +899,10 @@ def on_pdf(session, _arg=None):
     calc = session.get("calc") or {}
     sav = session.get("sav") or {}
     if not calc or not sav:
-        return session, emit(
-            "PDF собирается из вашего расчёта — сначала пройдём шаги. "
-            "Начнём с сферы деятельности?",
-            keyboard_sphere())
+        return session, emit(content.text("pdf.needs_steps"), keyboard_sphere())
     data = report_data(session, calc, sav)
     return session, [{
-        "text": ("Готовлю полный отчёт: рутина по операциям, экономия, бюджет "
-                 "и чек-лист с пояснениями."),
+        "text": content.text("pdf.preparing"),
         "pdf": data,
         "pdf_fallback": checklist_full_text(calc, sav),
         "buttons": keyboard_final(),
@@ -1159,8 +936,7 @@ def dispatch_text(text, session):
             return to_ops(session) if session.get("roles") else start(session)
         match = re.search(r"\d+", text or "")
         if not match:
-            return session, emit("Нужно число — например «7» или «примерно 12». "
-                                 "Кнопки 1–5 тоже работают.")
+            return session, emit(content.text("errors.need_number"))
         record_role(session, role["label"], int(match.group()), role["rate"])
         session["pending_role"] = None
         return ask_count(session)
@@ -1169,15 +945,12 @@ def dispatch_text(text, session):
         calc = session.get("calc") or {}
         summary = ""
         if calc:
-            summary = (f"\n\nЧерновик расчёта: {calc.get('sphere_label')} · "
-                       f"{calc.get('people')} чел · {fmt(calc.get('hours', 0))} ч/мес "
-                       f"рутины · ~{money(calc.get('cost_month', 0))}/мес.")
-        messages = emit(
-            TEXT_FEEDBACK_DONE + summary,
-            [[btn("📄 Полный отчёт (PDF)", "opt:p:report")],
-             [btn("🔧 Оптимизатор заново", "opt:again")],
-             [{"type": "link", "text": "Канал про автоматизацию",
-               "url": CHANNEL_URL}]])
+            summary = content.text("feedback.draft",
+                                   sphere=calc.get("sphere_label"),
+                                   people=calc.get("people"),
+                                   hours=fmt(calc.get("hours", 0)),
+                                   cost=money(calc.get("cost_month", 0)))
+        messages = emit(content.text("feedback.done") + summary, keyboard_after_lead())
         # «admin» — сигнал транспорту переслать этот текст владельцу
         messages[-1]["admin"] = text
         return {**session, "step": "done"}, messages

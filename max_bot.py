@@ -1,7 +1,9 @@
 """MAX-транспорт отдельного бота «Оптимизатор» (@se14730534_1_bot).
 
-Логика шести шагов целиком в optimizer.py — здесь только long polling MAX,
-доставка шагов в личку, ответы на нажатия кнопок и пересылка заявки владельцу.
+Логика шести шагов целиком в optimizer.py, формулировки и каталог — в content.py
+(с поверх кодовых дефолтов ложится content.json из репозитория); здесь только
+long polling MAX, доставка шагов в личку, ответы на нажатия кнопок и пересылка
+заявки владельцу.
 
 Как это работает с MAX:
 - бот пишет только тем, кто его запустил, поэтому личка может быть недоступна —
@@ -27,6 +29,7 @@ import time
 import requests
 
 import optimizer
+import content
 import report_pdf
 
 MAX_API = os.environ.get("MAX_API_BASE", "https://platform-api2.max.ru")
@@ -56,11 +59,13 @@ ADMIN_PENDING_FILE = os.environ.get("MAX_ADMIN_PENDING_FILE", ".max_admin_pendin
 ADMIN_PENDING_MAX = 50
 BOT_USERNAME = os.environ.get("MAX_BOT_USERNAME", "")
 
-TEXT_UNKNOWN = (
-    "Я Оптимизатор: шесть коротких вопросов — и на выходе часы рутины, их "
-    "стоимость, экономия и чек-лист внедрения.\n\n"
-    "Напишите /старт — и поехали."
-)
+TEXT_UNKNOWN = content.text("start_hint")
+"""Встреча и ответ на чужую кнопку до входа в расчёт.
+
+Значение приходит из content.py (а поверх — content.json из админки), поэтому
+формулировку правят без пулла в код. Читается на импорте: каждый круг Actions —
+свежий процесс, и следующий круг уже видит новую строку.
+"""
 TEXT_NO_TOKEN = ("MAX_BOT_TOKEN не задан — бот не может опрашивать MAX. "
                  "Добавьте секрет и перезапустите цикл.")
 
@@ -600,7 +605,8 @@ def handle_text(user_id, chat_id, name, username, text):
         handle_optimizer(user_id, chat_id, text=text, name=name, username=username)
         return
 
-    send_direct(user_id, TEXT_UNKNOWN, buttons=[[btn("🔧 Начать расчёт", "opt:start")]],
+    send_direct(user_id, TEXT_UNKNOWN,
+                buttons=[[btn(content.label("start"), "opt:start")]],
                 chat_id=chat_id)
 
 
@@ -678,6 +684,11 @@ def main():
           f"заявки: {routes[0][2] if routes else 'некуда слать (только очередь)'} · "
           f"PDF: {pdf_state} · "
           f"кнопка на финале: {optimizer.CHANNEL_URL}")
+    # Строка нужна, чтобы по логу прод-цикла видеть, подхватил ли бот правку
+    # админки (content.json) или всё ещё говорит код-дефолтами.
+    print("контент:", content.source_summary())
+    for line in content.problems():
+        print(f"::warning::контент: {line}")
     flush_admin_leads()
     bootstrap_state()
     next_flush = time.time() + 60

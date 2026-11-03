@@ -10,19 +10,30 @@
     python3 tools/simulate_optimizer.py --scenario solo  # один сценарий
     python3 tools/simulate_optimizer.py --json           # транскрипт в JSON
     python3 tools/simulate_optimizer.py --quiet          # только проверки
+    python3 tools/simulate_optimizer.py --overlay        # репетиция правки из админки
 
 Превью для глаз: optimizer-preview.html (открыть в браузере).
+
+Режим --overlay прогоняет те же сценарии второй раз поверх намеренно edited
+content.json (как его запишет админка) и сверяет два снимка: путь по кнопкам,
+форму клавиатур и цифры расчёта. Права из админки обязана менять слова, а не
+арифметику — если цифры сдвинулись, значит редактор контента полез туда, куда
+ему нельзя, или payload кнопки уехал вместе с подписью.
 """
 import argparse
+import contextlib
+import copy
 import html as html_mod
 import json
 import os
 import sys
+import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 PREVIEW_PATH = os.path.join(ROOT, "optimizer-preview.html")
 
+import content  # noqa: E402
 import optimizer as opt  # noqa: E402
 
 SCENARIOS = {
@@ -160,17 +171,19 @@ def play(name, script, verbose=True):
 HAPPY = ("solo", "team", "fire", "again", "typed")
 FAILURE_PHRASES = ("не распознана", "нет в списке", "не понял", "Не понял",
                    "нужно число", "Нужно число", "Traceback")
-INTRO = opt.text_intro().splitlines()[0][:24]
 
 
 def validate(transcripts):
     problems, payloads = [], set()
+    # Приветствие берём из активного контента: в режиме --overlay оно другое,
+    # строка, снятая на импорте, посчитала бы перезапуск нулём.
+    intro = opt.text_intro().splitlines()[0][:24]
     for name, transcript, session in transcripts:
         if name in HAPPY and session["step"] != "done":
             problems.append(f"{name}: не дошёл до финала (шаг {session['step']})")
         if name == "again":
             restarts = sum(1 for item in transcript
-                           if item["role"] == "bot" and item["text"].startswith(INTRO))
+                           if item["role"] == "bot" and item["text"].startswith(intro))
             if restarts < 2:
                 problems.append(f"again: «Пройти заново» не вернул к шагу 1 "
                                 f"(приветствий: {restarts})")
@@ -273,18 +286,212 @@ padding:3px 9px;font-size:12px}
 """ + "\n".join(sections) + "</body></html>\n"
 
 
+ADMIN_MARK = "ПРАВКА-ИЗ-АДМИНКИ"
+
+
+def numbers_only(value):
+    """Числовая тень расчёта: подписи и названия выброшены, цифры остались.
+
+    Нужно для сверки «до правки / после правки»: админка меняет слова, и если
+    вместе со словами сдвинулась цифра — значит редактор полез в то, что должно
+    остаться в коде (ставкам, часам и факторам в оверлее не бывать).
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, dict):
+        return {key: numbers_only(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [numbers_only(item) for item in value]
+    return None
+
+
+def fingerprint(transcript, session):
+    """Отпечаток прогона: куда кликали, какие клавиатуры показывали, что посчитали."""
+    clicks = [item["payload"] for item in transcript if item["payload"]]
+    keyboards = [[[button.get("payload") or button.get("url") or button.get("text")
+                   for button in row] for row in (item.get("raw") or [])]
+                 for item in transcript if item.get("raw")]
+    maths = {key: numbers_only(session.get(key))
+             for key in ("calc", "sav", "roles", "ops", "tools")}
+    return {"clicks": clicks, "keyboards": keyboards, "maths": maths,
+            "messages": len(transcript)}
+
+
+def admin_overlay():
+    """content.json таким, каким его отдаёт админка после правки формулировок.
+
+    Правим по одному полю каждого сорта — текст, подпись кнопки, сфера, роль,
+    операция, инструмент, шаг чек-листа — и проверяем две стороны одной медали.
+    Поля из `shown` обязаны появиться в диалоге или в отчёте: если не появились,
+    админка дарит владельцу редактор для строки, которую бот не показывает. Поля
+    из `silent` обязаны НЕ появляться: они лежат в content.json как справочник
+    расчёта, и мету их держит meta.internal — админка гасит такие поля и пишет,
+    что на сообщения они не влияют.
+
+    Берём те сферы, роли и инструменты, по которым сценарии действительно
+    кликают, иначе «правка не появилась» означала бы лишь то, что сценарий туда
+    не заглядывал. Числа (ставки, часы, факторы, бюджеты) не трогаем: админка их
+    не показывает, а чекер следит, чтобы они не поехали сами.
+    """
+    with open(content.CONTENT_FILE, encoding="utf-8") as handle:
+        tree = json.load(handle)
+    shown, silent = {}, {}
+    cat = tree["catalog"]
+
+    def sphere_of(sid):
+        return next(s for s in cat["spheres"] if s["id"] == sid)
+
+    def edit_text(path, value, note):
+        node = tree["texts"]
+        for key in path.split(".")[:-1]:
+            node = node[key]
+        node[path.split(".")[-1]] = value
+        shown[note] = value
+
+    edit_text("intro", f"{ADMIN_MARK}: шесть вопросов — и расчёт готов.",
+              "текст шага 1")
+    edit_text("stale", f"{ADMIN_MARK}: кнопка из прошлого расчёта.",
+              "реплика про просроченный шаг")
+    edit_text("checklist.title", f"<b>{ADMIN_MARK}: порядок внедрения</b>",
+              "заголовок чек-листа")
+    tree["buttons"]["final"]["pdf"] = f"📄 {ADMIN_MARK}-отчёт"
+    shown["кнопка полного отчёта"] = tree["buttons"]["final"]["pdf"]
+
+    # Справочные поля: участвуют в расчёте или в логике, но в сообщениях не видны.
+    # Именно их перечисляет meta.internal — админка гасит такие поля с пояснением.
+    cat["self_role"]["label"] = f"{ADMIN_MARK}-руковожу-сам"
+    silent["роль «только я»"] = cat["self_role"]["label"]
+    sphere_of("ecom")["blurb"] = f"{ADMIN_MARK}-описание-сферы"
+    silent["описание сферы"] = sphere_of("ecom")["blurb"]
+
+    sphere_of("ecom")["label"] = f"{ADMIN_MARK}-сфера"
+    shown["кнопка сферы"] = sphere_of("ecom")["label"]
+    op = sphere_of("ecom")["ops"][0]
+    op["label"] = f"{ADMIN_MARK}-операция"
+    shown["операция в рутине"] = op["label"]
+    op["detail"] = f"{ADMIN_MARK}-пояснение к операции"
+    shown["пояснение операции"] = op["detail"]
+    role = sphere_of("it")["roles"][0]
+    role["label"] = f"{ADMIN_MARK}-специальность"
+    shown["специальность в команде"] = role["label"]
+    tool = next(t for t in cat["tools"] if t["id"] == "n8n")
+    tool["label"] = f"{ADMIN_MARK}-инструмент"
+    shown["инструмент оптимизации"] = tool["label"]
+    tool["what"] = f"{ADMIN_MARK}-что делает инструмент"
+    shown["назначение инструмента"] = tool["what"]
+    tool["pilot"] = f"{ADMIN_MARK}-пилот инструмента"
+    shown["пилот инструмента"] = tool["pilot"]
+    cat["checklist"][0]["short"] = f"{ADMIN_MARK}-шаг в чате"
+    shown["короткий шаг чек-листа"] = cat["checklist"][0]["short"]
+    cat["checklist"][1]["title"] = f"{ADMIN_MARK}-шаг в отчёте"
+    shown["подробный шаг чек-листа"] = cat["checklist"][1]["title"]
+    cat["checklist"][2]["body"] = f"{ADMIN_MARK} пояснение шага внедрения"
+    shown["тело шага внедрения"] = cat["checklist"][2]["body"]
+    return tree, shown, silent
+
+
+@contextlib.contextmanager
+def overlay(tree):
+    """Подменить content.json на время: ровно то, что делает следующий круг Actions."""
+    path = os.path.join(tempfile.mkdtemp(), "content.json")
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(tree, handle, ensure_ascii=False)
+    saved = content.CONTENT_FILE
+    content.CONTENT_FILE = path
+    content.reload()
+    opt.refresh_catalog()
+    try:
+        yield
+    finally:
+        content.CONTENT_FILE = saved
+        content.reload()
+        opt.refresh_catalog()
+
+
+def run_overlay(names, verbose=False):
+    """Второй заход теми же сценариями поверх оверлея + сверка с боевым прогоном."""
+    problems = []
+    with overlay(_TREE):
+        transcripts = [(name,) + play(name, SCENARIOS[name], verbose=verbose)
+                       for name in names]
+
+        # 1. Пути и цифры не изменились.
+        for name, transcript, session in transcripts:
+            here = fingerprint(transcript, session)
+            there = _FINGERPRINTS[name]
+            if here["clicks"] != there["clicks"]:
+                problems.append(f"{name}: после правки изменился путь по кнопкам — "
+                                "payload уехал вместе с подписью")
+            if here["maths"] != there["maths"]:
+                problems.append(f"{name}: после правки сдвинулись цифры расчёта")
+            if here["keyboards"] != there["keyboards"]:
+                problems.append(f"{name}: после правки изменился состав кнопок "
+                                "(не только надписи)")
+        extra, _ = validate(transcripts)
+        problems += [f"оверлей: {p}" for p in extra]
+
+        # 2. Правки действительно дошли до пользователя: часть строк видна в
+        # чате, часть — только в отчёте (PDF и заявке владельцу), поэтому сверяем
+        # оба места. Маркер, который не появился нигде, означает «админ правит
+        # поле, которое бот не показывает».
+        chunks = [item["text"] + " " + item["buttons"]
+                  for _, transcript, _ in transcripts for item in transcript]
+        for _, _, session in transcripts:
+            calc, sav = session.get("calc"), session.get("sav")
+            if calc and sav:
+                chunks.append(json.dumps(opt.report_data(session, calc, sav),
+                                         ensure_ascii=False))
+        blob = "\n".join(chunks)
+        for note, marker in _SHOWN.items():
+            if marker not in blob:
+                problems.append(f"оверлей: правка «{note}» не появилась ни в чате, "
+                                "ни в отчёте — админка редактирует строку, которую "
+                                "бот не показывает")
+        for note, marker in _SILENT.items():
+            if marker in blob:
+                problems.append(f"оверлей: справочное поле «{note}» вылезло в "
+                                "сообщения — уберите его из meta.internal")
+        for warning in content.warnings():
+            problems.append(f"оверлей: {warning}")
+
+    print("\n--- репетиция правки из админки ---")
+    print(f"сценариев перезапущено: {len(names)} · видно в диалоге/отчёте: "
+          f"{len(_SHOWN)} · справочных (не видны намеренно): {len(_SILENT)}")
+    return problems
+
+
+_TREE = {}
+_SHOWN = {}
+_SILENT = {}
+_FINGERPRINTS = {}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scenario", choices=sorted(SCENARIOS))
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--no-preview", action="store_true")
+    parser.add_argument("--overlay", action="store_true",
+                        help="прогнать сценарии ещё раз поверх правленого content.json "
+                             "и сравнить путь, клавиатуры и цифры с боевым прогоном")
     args = parser.parse_args()
 
     names = [args.scenario] if args.scenario else list(SCENARIOS)
     transcripts = [(name,) + play(name, SCENARIOS[name], verbose=not args.quiet)
                    for name in names]
     problems, payloads = validate(transcripts)
+
+    if args.overlay:
+        # Снимки боевого прогона и оверлей готовятся до подмены файла: run_overlay
+        # читает их уже из глобалов, когда контент подменён.
+        global _TREE, _SHOWN, _SILENT, _FINGERPRINTS
+        _FINGERPRINTS = {name: fingerprint(transcript, session)
+                         for name, transcript, session in transcripts}
+        _TREE, _SHOWN, _SILENT = admin_overlay()
+        problems += run_overlay(names, verbose=False)
 
     print("\n--- проверки ---")
     print(f"сценариев: {len(transcripts)} · payload'ов: {len(payloads)} · "

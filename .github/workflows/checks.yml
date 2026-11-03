@@ -1,0 +1,53 @@
+name: Check content and flow
+
+# Врата для правок из админки. Админка валидирует сама, но её легко обойти —
+# кто-нибудь отредактирует content.json руками или подкинет файл из другой
+# ветки. Этот workflow ловит такое до того, как цикл бота подхватит файл:
+# зелёная галочка у коммита означает «бот покажет это без предупреждений».
+#
+# Деплой тут не нужен: run-optimizer.yml запускается на тот же push и сам
+# перезапустит цикл. Здесь только проверки, и они не трогают MAX и секреты.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "content.py"
+      - "content.json"
+      - "content.schema.json"
+      - "optimizer.py"
+      - "max_bot.py"
+      - "report_pdf.py"
+      - "tools/**"
+      - ".github/workflows/checks.yml"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Контент и схема админки актуальны
+        # Дамп сверяет файл с кодом: не хватает ключей, лишние ключи, чужие
+        # {переменные} в шаблонах и устаревший content.schema.json.
+        run: python3 tools/dump_content.py --check
+      - name: Врата контента
+        run: python3 tools/check_content.py
+      - name: Интеграция бота без сети
+        run: python3 tools/check_max_bot.py
+      - name: Сценарии диалога + репетиция правки из админки
+        # --overlay перезапущает те же сценарии поверх отредактированного
+        # content.json и сверяет путь по кнопкам, состав клавиатур и цифры.
+        run: python3 tools/simulate_optimizer.py --overlay --quiet --no-preview
+      - name: Фаззинг случайных кликов
+        run: python3 tools/fuzz_optimizer.py --runs 300

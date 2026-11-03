@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Админка контента «Оптимизатора»</title>
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#fff; --line:#e3e6ea; --ink:#1c2026; --dim:#66707e;
+  --accent:#2e6bd6; --ok:#1a9c6b; --warn:#c8791a; --bad:#cf3b3b;
+  --bot:#eef1f5; --chip:#eef4ff;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--bg-ink,var(--ink));
+  font:14px/1.5 -apple-system,Inter,"Segoe UI",system-ui,sans-serif}
+header{position:sticky;top:0;z-index:5;background:var(--panel);
+  border-bottom:1px solid var(--line);padding:10px 16px;display:flex;
+  gap:10px;align-items:center;flex-wrap:wrap}
+header h1{font-size:15px;margin:0 8px 0 0;font-weight:600}
+.pill{font-size:12px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);
+  background:var(--bg);color:var(--dim);white-space:nowrap}
+.pill.ok{color:var(--ok);border-color:#bfe4d4;background:#f0fbf6}
+.pill.warn{color:var(--warn);border-color:#f0dcbd;background:#fdf7ee}
+.pill.bad{color:var(--bad);border-color:#f0c7c7;background:#fdf1f1}
+button{font:inherit;border-radius:9px;border:1px solid var(--line);background:#fff;
+  color:var(--ink);padding:6px 12px;cursor:pointer}
+button:hover{border-color:#c9d2de}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.primary:disabled{opacity:.5;cursor:not-allowed}
+button.ghost{background:transparent;border-color:transparent;color:var(--dim)}
+.layout{display:grid;grid-template-columns:230px minmax(0,1fr);gap:16px;
+  padding:16px;max-width:1400px;margin:0 auto}
+nav{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:8px;position:sticky;top:64px;align-self:start;max-height:calc(100vh - 80px);
+  overflow:auto}
+nav b{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--dim);margin:10px 8px 4px}
+nav a{display:block;padding:6px 9px;border-radius:8px;color:var(--ink);
+  text-decoration:none;font-size:13px;cursor:pointer}
+nav a:hover{background:var(--bg)}
+nav a.active{background:#e9f0fd;color:var(--accent);font-weight:600}
+nav a .n{float:right;color:var(--dim);font-size:11px}
+main{min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:14px;margin-bottom:14px}
+.card>h2{margin:0 0 4px;font-size:15px}
+.card>p.hint{margin:0 0 12px;color:var(--dim);font-size:12.5px}
+.field{border-top:1px solid var(--line);padding:12px 0}
+.field:first-of-type{border-top:none}
+.field.changed{background:#fbfcff;margin:0 -14px;padding:12px 14px;
+  border-left:3px solid var(--accent)}
+.fhead{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-bottom:6px}
+.fhead .title{font-weight:600}
+.fhead .path{color:var(--dim);font-size:11px;font-family:ui-monospace,Menlo,monospace}
+.fhead .badge{font-size:11px;color:var(--accent);background:#e9f0fd;
+  border-radius:6px;padding:1px 7px}
+.fhead .badge.silent{color:var(--dim);background:var(--bg)}
+textarea,input[type=text],input[type=number]{font:inherit;width:100%;
+  border:1px solid var(--line);border-radius:9px;padding:8px 10px;background:#fff;
+  color:var(--ink)}
+textarea{min-height:64px;resize:vertical}
+textarea.mono{font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.chips{display:flex;gap:5px;flex-wrap:wrap;margin:6px 0}
+.chip{font-size:12px;background:var(--chip);border:1px solid #d7e5ff;color:#245bb0;
+  border-radius:7px;padding:2px 7px;cursor:pointer;font-family:ui-monospace,Menlo,monospace}
+.chip.miss{background:#fdf1f1;border-color:#f0c7c7;color:var(--bad)}
+.preview{background:var(--bot);border-radius:12px 12px 12px 4px;padding:9px 12px;
+  margin-top:6px;font-size:13.5px;max-width:640px}
+.preview b{font-weight:600}
+.preview .keys{margin-top:7px;display:flex;gap:5px;flex-wrap:wrap}
+.preview .keys span{border:1px solid #b9cdea;background:#fff;color:#245bb0;
+  border-radius:999px;padding:2px 9px;font-size:12px}
+.meta{color:var(--dim);font-size:11.5px;margin-top:4px}
+.item{border:1px solid var(--line);border-radius:11px;padding:11px;margin-bottom:10px;
+  background:#fff}
+.item h3{margin:0 0 8px;font-size:14px;display:flex;gap:8px;align-items:center;
+  flex-wrap:wrap}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px}
+.grid label{font-size:11.5px;color:var(--dim);display:block;margin-bottom:3px}
+details.adv{border:1px dashed var(--line);border-radius:10px;padding:8px 10px;
+  margin-top:8px;background:#fcfcfd}
+details.adv summary{cursor:pointer;color:var(--dim);font-size:12.5px}
+.problems{border:1px solid #f0c7c7;background:#fdf1f1;border-radius:10px;
+  padding:10px 12px;margin-bottom:12px}
+.problems ul{margin:6px 0 0;padding-left:18px}
+.problems li{font-size:12.5px;margin-bottom:3px}
+.problems.warn{border-color:#f0dcbd;background:#fdf7ee;color:var(--warn)}
+.small{font-size:12px;color:var(--dim)}
+.dialog{position:fixed;inset:0;background:rgba(20,24,30,.45);display:none;
+  align-items:center;justify-content:center;padding:16px;z-index:20}
+.dialog.open{display:flex}
+.dialog .box{background:#fff;border-radius:14px;max-width:560px;width:100%;
+  padding:16px;max-height:90vh;overflow:auto}
+.dialog h2{margin:0 0 10px;font-size:16px}
+.search{flex:1;min-width:160px;max-width:320px}
+@media (max-width:900px){
+  .layout{grid-template-columns:1fr;padding:10px}
+  nav{position:static;max-height:none;display:flex;flex-wrap:wrap;gap:4px}
+  nav b{width:100%}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Админка контента · «Оптимизатор»</h1>
+  <span class="pill" id="status">файл не загружен</span>
+  <span class="pill" id="changes">правок: 0</span>
+  <input class="search" id="search" placeholder="поиск по тексту или ключу">
+  <button id="btn-settings">Доступ</button>
+  <button id="btn-reload">Загрузить заново</button>
+  <button id="btn-check">Проверить</button>
+  <button class="primary" id="btn-save">Сохранить коммитом</button>
+</header>
+
+<div class="layout">
+  <nav id="nav"></nav>
+  <main id="main">
+    <div class="card">
+      <h2>Что это</h2>
+      <p class="hint">Страница правит <code>content.json</code> в репозитории
+      <code>personalartru/noroutine-optimizer</code> и коммитит его в <code>main</code>.
+      Следующий круг цикла бота делает checkout и подхватывает правку — примерно за
+      10 минут, а push из этой страницы поднимает цикл сразу. Порядок шагов,
+      арифметика расчёта и payload'ы кнопок остаются в коде: они не отдают себя
+      на вольный текст, иначе цифры начнут врать.</p>
+      <div class="row">
+        <button id="btn-start">Подключиться и загрузить</button>
+        <span class="small">Нужен personal access token с правом
+          <b>Contents: Write</b> на этот репозорий. Он хранится только в этом браузере
+          (localStorage) и никуда, кроме GitHub API, не уходит.</span>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="dialog" id="dlg-settings">
+  <div class="box">
+    <h2>Доступ к репозиторию</h2>
+    <div class="grid">
+      <div>
+        <label>Репозиторий (владелец/имя)</label>
+        <input type="text" id="set-repo">
+      </div>
+      <div>
+        <label>Токен (Contents: Write)</label>
+        <input type="text" id="set-token" placeholder="ghp_…">
+      </div>
+      <div>
+        <label>Ветка</label>
+        <input type="text" id="set-branch">
+      </div>
+    </div>
+    <p class="small">Токен не нужен, чтобы просто посмотреть: файл читается открыто.
+      Без токена страница не даёт сохранять.</p>
+    <div class="row" style="margin-top:10px">
+      <button class="primary" id="set-save">Сохранить и загрузить</button>
+      <button id="set-close">Отмена</button>
+      <button class="ghost" id="set-forget">Забыть токен в этом браузере</button>
+    </div>
+  </div>
+</div>
+
+<div class="dialog" id="dlg-commit">
+  <div class="box">
+    <h2>Коммит в main</h2>
+    <div id="commit-summary"></div>
+    <label style="display:block;margin:10px 0 4px;font-size:12px;color:var(--dim)">
+      Сообщение коммита</label>
+    <input type="text" id="commit-message">
+    <div class="row" style="margin-top:12px">
+      <button class="primary" id="commit-send">Отправить</button>
+      <button id="commit-close">Отмена</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ── Состояние ─────────────────────────────────────────────────────────────── */
+const KEYS = {repo: "opt_repo", token: "opt_token", branch: "opt_branch",
+              draft: "opt_draft_v1"};
+const S = {
+  repo: localStorage.getItem(KEYS.repo) || "personalartru/noroutine-optimizer",
+  token: localStorage.getItem(KEYS.token) || "",
+  branch: localStorage.getItem(KEYS.branch) || "main",
+  sha: null, schema: null, loaded: null, draft: null, group: "greeting",
+  problems: [], warnings: [],
+};
+const $ = sel => document.querySelector(sel);
+const CONTENT_FILE = "content.json", SCHEMA_FILE = "content.schema.json";
+
+function pathGet(obj, path) {
+  return path.split(".").reduce((n, k) => (n == null ? undefined : n[k]), obj);
+}
+function pathSet(obj, path, value) {
+  const parts = path.split(".");
+  let node = obj;
+  parts.slice(0, -1).forEach(k => { node = node[k] ?? (node[k] = {}); });
+  node[parts[parts.length - 1]] = value;
+}
+function pathDelete(obj, path) {
+  const parts = path.split("."), last = parts.pop();
+  const node = pathGet(obj, parts.join("."));
+  if (node && Array.isArray(node) && /^\d+$/.test(last)) node.splice(Number(last), 1);
+  else if (node) delete node[last];
+}
+/* Служебные пути вида catalog.spheres[].blurb сверяются с путями редактирования
+   (catalog.spheres.3.blurb): [] в паттерне — любой элемент списка. */
+function internalRx(pattern) {
+  const body = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")   // экранируем всё
+                      .split("\\[\\]").join("\\.\\d+");          // [] → «.любой индекс»
+  return new RegExp("^" + body + "$");
+}
+function matchesInternal(path) {
+  return (S.schema?.internal || []).some(p => internalRx(p).test(path));
+}
+function clone(x) { return JSON.parse(JSON.stringify(x)); }
+
+/* ── Загрузка файлов ───────────────────────────────────────────────────────── */
+async function gh(url, opts = {}) {
+  const headers = {Accept: "application/vnd.github+json"};
+  if (S.token) headers.Authorization = "Bearer " + S.token;
+  const res = await fetch(url, {...opts, headers});
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.json()).message || ""; } catch (e) {}
+    throw new Error(`GitHub ответил ${res.status}. ${detail}`);
+  }
+  return res.json();
+}
+function rawUrl(name) {
+  return `https://raw.githubusercontent.com/${S.repo}/${S.branch}/${name}`;
+}
+/* С токеном читаем через Contents API — оттуда же берётся sha для коммита. */
+async function readRepoFile(name, needSha) {
+  if (S.token && needSha) {
+    const data = await gh(`https://api.github.com/repos/${S.repo}/contents/${name}` +
+                          `?ref=${S.branch}`);
+    return {tree: JSON.parse(decodeURIComponent(escape(atob(data.content)))),
+            sha: data.sha};
+  }
+  const res = await fetch(rawUrl(name) + "?t=" + Date.now());
+  if (!res.ok) throw new Error(`Не удалось прочитать ${name}: HTTP ${res.status}`);
+  return {tree: await res.json(), sha: null};
+}
+
+async function loadAll() {
+  setStatus("загружаю…", "");
+  try {
+    const schema = await readRepoFile(SCHEMA_FILE, false);
+    S.schema = schema.tree;
+    const content = await readRepoFile(CONTENT_FILE, !!S.token);
+    S.loaded = content.tree;
+    S.sha = content.sha;
+    const draft = sessionStorage.getItem(KEYS.draft);
+    S.draft = draft ? JSON.parse(draft) : clone(content.tree);
+    render();
+    setStatus(content.sha ? `файл загружен · sha ${content.sha.slice(0, 7)}`
+                          : "файл загружен (без токена — sha для коммита запросится при сохранении)",
+              "ok");
+  } catch (e) {
+    setStatus("не загрузилось", "bad");
+    showProblems([String(e.message || e)]);
+  }
+}
+function saveDraft() {
+  sessionStorage.setItem(KEYS.draft, JSON.stringify(S.draft));
+  renderChangesPill();
+}
+
+/* ── Подстановка переменных для предпросмотра ──────────────────────────────── */
+function esc(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function allowedTags(s) {              /* после esc() возвращаем только <b> и <i> */
+  return s.replace(/&lt;(\/?(?:b|i))&gt;/g, "<$1>");
+}
+function renderTemplate(tpl, withVars) {
+  const demo = S.schema?.demo || {};
+  return (tpl || "").replace(/\{([a-z_][a-z0-9_]*)(?![{])/g, (all, name) =>
+    withVars && withVars[name] !== undefined ? String(withVars[name])
+      : (demo[name] !== undefined ? String(demo[name]) : all));
+}
+
+/* ── Валидация: те же правила, что у content.py ───────────────────────────── */
+function validate() {
+  const problems = [], warnings = [], limits = S.schema.limits, vars = S.schema.variables;
+  const t = S.draft;
+  if (t.schema !== S.schema.schema)
+    problems.push(`schema: файл говорит, что версия ${t.schema}, код ждёт ${S.schema.schema}`);
+
+  for (const group of ["texts", "buttons", "words"]) {
+    walkStrings(t[group], group, (path, value) => {
+      const allowed = vars[path];
+      if (allowed === undefined) {
+        problems.push(`${path}: ключа нет в коде — правку никто не применит`);
+        return;
+      }
+      const used = [...value.matchAll(/\{([a-z_][a-z0-9_]*)(?![{])/g)].map(m => m[1]);
+      const unknown = used.filter(v => !allowed.includes(v));
+      if (unknown.length)
+        problems.push(`${path}: переменные {${unknown.join("}, {")}} код не подставляет ` +
+                      `— вместо текста покажется вариант из кода`);
+      const missed = allowed.filter(v => !used.includes(v));
+      if (missed.length)
+        warnings.push(`${path}: пропала подстановка {${missed.join("}, {")}} — ` +
+                      `число или название не появится в сообщении`);
+      if (group === "buttons") {
+        if (/[<>]/.test(value))
+          problems.push(`${path}: в подписи кнопки нельзя HTML — MAX покажет теги текстом`);
+        if (value.length > limits.button_label)
+          problems.push(`${path}: подпись кнопки ${value.length} символов, ` +
+                        `MAX обрежет после ${limits.button_label}`);
+        if (!value.trim()) problems.push(`${path}: пустая подпись кнопки`);
+      } else if (!value.trim()) {
+        warnings.push(`${path}: пустой текст — в чате будет пустое сообщение`);
+      }
+      if (group === "texts" && value.length > limits.text_chunk && !value.includes("\n\n"))
+        warnings.push(`${path}: ${value.length} символов без пустой строки — ` +
+                      `сообщение разрежется по середине абзаца`);
+    });
+  }
+
+  /* Каталог: структура, уникальные id, числа, payload'ы кнопок. */
+  const cat = t.catalog;
+  const isNum = v => typeof v === "number" && isFinite(v);
+  if (!isNum(cat.self_role.salary) || cat.self_role.salary <= 0)
+    problems.push("catalog.self_role.salary: ставка «я сам» должна быть положительным числом");
+  const sphereIds = [];
+  cat.spheres.forEach((s, i) => {
+    const where = `catalog.spheres[${i}] («${s.label}»)`, id = String(s.id || "");
+    if (!id) problems.push(`${where}: пустой служебный ключ id`);
+    else if (sphereIds.includes(id)) problems.push(`${where}: id «${id}» уже используется`);
+    sphereIds.push(id);
+    if (!/^[a-z0-9_-]{2,24}$/.test(id))
+      problems.push(`${where}: id «${id}» — только строчные латинские буквы, цифры, «-» и «_»`);
+    if (!String(s.label || "").trim()) problems.push(`${where}: пустое название сферы`);
+    if (!s.roles?.length) problems.push(`${where}: ни одной специальности — шаг 1 не пройдёт`);
+    s.roles.forEach((r, j) => {
+      if (!String(r.label || "").trim()) problems.push(`${where}.roles[${j}]: пустое название`);
+      if (!isNum(r.salary) || r.salary <= 0)
+        problems.push(`${where}.roles[${j}].salary: нужна положительная зарплата в ₽`);
+    });
+    if (!s.ops?.length) problems.push(`${where}: ни одной рутины — расчёт нечего считать`);
+    const opIds = [];
+    s.ops.forEach((o, j) => {
+      const w = `${where}.ops[${j}]`;
+      if (!o.id || opIds.includes(o.id)) problems.push(`${w}: id «${o.id}» пустой или повтор`);
+      opIds.push(o.id);
+      if (!/^[a-z0-9_-]{2,24}$/.test(String(o.id || "")))
+        problems.push(`${w}: id «${o.id}» не подходит (только латиница, цифры, -, _)`);
+      if (!String(o.label || "").trim()) problems.push(`${w}: пустое название операции`);
+      if (!isNum(o.hours) || o.hours <= 0) problems.push(`${w}.hours: нужно число часов больше нуля`);
+      if (o.hours > 730) warnings.push(`${w}.hours: ${o.hours} ч/мес — это больше месяца работы`);
+    });
+  });
+  const toolIds = [];
+  cat.tools.forEach((tool, i) => {
+    const w = `catalog.tools[${i}] («${tool.label}»)`;
+    if (!tool.id || toolIds.includes(tool.id)) problems.push(`${w}: id «${tool.id}» пустой или повтор`);
+    toolIds.push(tool.id);
+    if (tool.id === "fire") problems.push(`${w}: «fire» зарезервирован под шутку-кнопку`);
+    if (!isNum(tool.factor) || tool.factor <= 0 || tool.factor > 1)
+      problems.push(`${w}.factor: доля между 0 и 1 (например 0.65)`);
+    for (const key of ["impl", "support"]) {
+      const range = tool[key];
+      if (!Array.isArray(range) || range.length !== 2 || !isNum(range[0]) || !isNum(range[1]))
+        problems.push(`${w}.${key}: нужно два числа — от и до`);
+      else if (range[0] > range[1])
+        problems.push(`${w}.${key}: «от» больше «до» — бюджет перевёрнут`);
+    }
+    for (const key of ["what", "pilot"])
+      if (!String(tool[key] || "").trim()) problems.push(`${w}.${key}: пусто`);
+  });
+  if (cat.fire_tool.id !== "fire")
+    problems.push("catalog.fire_tool.id: должен остаться «fire» — на него смотрит расчёт");
+  cat.count_buttons.forEach((row, i) => row.forEach((pair, j) => {
+    const w = `catalog.count_buttons[${i}][${j}]`;
+    const payload = String(pair[1] || "");
+    if (!String(pair[0] || "").trim()) problems.push(`${w}: пустая подпись кнопки`);
+    if (!/^opt:[a-z]:[\w-]+$/.test(payload) && !/^opt:(reset|again|start|cancel)$/.test(payload))
+      problems.push(`${w}: payload «${payload}» должен быть вида opt:c:8`);
+    if (payload.length > limits.payload)
+      problems.push(`${w}: payload ${payload.length} символов, лимит ${limits.payload}`);
+    if (!(payload.split(":")[1] in HANDLERS))
+      problems.push(`${w}: вид payload'а «${payload.split(":")[1]}» dispatcher не знает`);
+  }));
+  cat.count_buttons.forEach((row, i) => {
+    if (row.length > limits.row_buttons)
+      problems.push(`catalog.count_buttons[${i}]: ${row.length} кнопок в ряду, ` +
+                    `MAX покажет ${limits.row_buttons}`);
+  });
+  cat.checklist.forEach((step, i) => {
+    const w = `catalog.checklist[${i}]`;
+    for (const key of ["emoji", "title", "short", "body", "when"])
+      if (!String(step[key] || "").trim()) problems.push(`${w}.${key}: пусто`);
+    ["title", "short", "body", "when"].forEach(key => {
+      const unknown = [...String(step[key] || "").matchAll(/\{([a-z_][a-z0-9_]*)(?![{])/g)]
+        .map(m => m[1]).filter(v => !(CATALOG_VARS[key] || []).includes(v));
+      if (unknown.length)
+        problems.push(`${w}.${key}: переменные {${unknown.join("}, {")}} не подставляются ` +
+                      `в чек-листе (доступны: ${CATALOG_VARS[key].join(", ")})`);
+    });
+  });
+  /* Фигурные скобки код подставляет только в полях чек-листа: в остальном
+     каталоге {something} уедет в сообщение как есть. */
+  walkStrings(cat, "catalog", (path, value) => {
+    if (/^catalog\.checklist\.\d+\./.test(path)) return;
+    const braces = [...value.matchAll(/\{([a-z_][a-z0-9_]*)(?![{])/g)].map(m => m[1]);
+    if (braces.length)
+      warnings.push(`${path}: {${braces.join("}, {")}} — подстановка работает ` +
+                    "только в чек-листе, здесь скобки видны читателю");
+  });
+
+  const url = String(t.meta.channel_url || "");
+  if (!/^https:\/\//.test(url))
+    problems.push("meta.channel_url: ссылка канала должна начинаться с https://");
+
+  S.problems = problems; S.warnings = warnings;
+  return problems.length === 0;
+}
+const CATALOG_VARS = {title: ["first", "second", "pilot", "tools", "i"],
+                      short: ["first", "first_hours", "second", "pilot", "tools"],
+                      body: ["first", "second", "pilot", "tools"],
+                      when: []};
+/* Виды payload'ов, которые знает dispatcher бота (optimizer.HANDLERS). */
+const HANDLERS = {s: 1, m: 1, r: 1, c: 1, n: 1, o: 1, t: 1, p: 1, fb: 1,
+                  reset: 1, again: 1, start: 1, cancel: 1};
+
+function walkStrings(tree, prefix, visit) {
+  Object.entries(tree || {}).forEach(([key, value]) => {
+    const path = `${prefix}.${key}`;
+    if (typeof value === "string") visit(path, value);
+    else if (value && typeof value === "object") walkStrings(value, path, visit);
+  });
+}
+
+/* ── Разница с загруженным файлом ──────────────────────────────────────────── */
+function changedPaths() {
+  const out = [];
+  const walk = (a, b, prefix) => {
+    const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+    keys.forEach(key => {
+      const path = prefix ? `${prefix}.${key}` : key;
+      const x = a?.[key], y = b?.[key];
+      if (JSON.stringify(x) === JSON.stringify(y)) return;
+      if (x && y && typeof x === "object" && typeof y === "object" &&
+          !Array.isArray(x) && !Array.isArray(y)) { walk(x, y, path); return; }
+      if (!out.includes(path)) out.push(path);
+    });
+  };
+  walk(S.loaded, S.draft, "");
+  return out;
+}
+
+/* ── Рендер ────────────────────────────────────────────────────────────────── */
+function setStatus(text, kind) {
+  const el = $("#status");
+  el.textContent = text;
+  el.className = "pill" + (kind ? " " + kind : "");
+}
+function renderChangesPill() {
+  const n = S.draft ? changedPaths().length : 0;
+  const el = $("#changes");
+  el.textContent = "правок: " + n;
+  el.className = "pill" + (n ? " warn" : "");
+  $("#btn-save").disabled = !n || !S.token;
+}
+function showProblems(list, warnOnly) {
+  const box = $("#problems");
+  if (box) box.remove();
+  if (!list.length) return;
+  const div = document.createElement("div");
+  div.className = "problems" + (warnOnly ? " warn" : "");
+  div.id = "problems";
+  div.innerHTML = `<b>${warnOnly ? "Замечания" : "Не сохранится, потому что"}</b>` +
+    "<ul>" + list.map(p => `<li>${esc(p)}</li>`).join("") + "</ul>";
+  $("#main").prepend(div);
+}
+function titleOf(path) {
+  const leaf = path.split(".").pop();
+  const named = (S.schema.field_labels || {})[leaf];
+  if (named) return named;
+  const words = leaf.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+/* Подстановки: для текстов и кнопок — справочник из кода (schema.variables), для
+   полей чек-листа — единый набор, его отдаёт optimizer.checklist_values. */
+function varsFor(path) {
+  const fromSchema = S.schema.variables[path];
+  if (fromSchema) return fromSchema.slice();
+  const m = /^catalog\.checklist\.\d+\.(emoji|title|short|body|when)$/.exec(path);
+  return m ? (CATALOG_VARS[m[1]] || []).slice() : [];
+}
+function fieldRow(path, value, opts = {}) {
+  const vars = opts.chips === false ? [] : varsFor(path);
+  const used = [...String(value || "").matchAll(/\{([a-z_][a-z0-9_]*)(?![{])/g)].map(m => m[1]);
+  const changed = JSON.stringify(pathGet(S.loaded, path)) !== JSON.stringify(value);
+  const silent = matchesInternal(path);
+  const demo = S.schema.demo;
+  const preview = allowedTags(esc(renderTemplate(String(value || ""), demo)));
+  const div = document.createElement("div");
+  div.className = "field" + (changed ? " changed" : "");
+  div.dataset.path = path;
+  div.innerHTML = `
+    <div class="fhead">
+      <span class="title">${esc(opts.title || titleOf(path))}</span>
+      <span class="path">${esc(path)}</span>
+      ${changed ? '<span class="badge" data-role="change">правка</span>' : ""}
+      ${silent ? '<span class="badge silent">не видно в чате</span>' : ""}
+      ${changed ? '<button class="ghost" data-revert>вернуть</button>' : ""}
+    </div>
+    <textarea class="${opts.mono ? "mono" : ""}" data-field="${esc(path)}"
+      rows="${opts.rows || 2}">${esc(value)}</textarea>
+    ${vars.length ? `<div class="chips">${vars.map(v =>
+      `<span class="chip${used.includes(v) ? "" : " miss"}" data-var="{${v}}"
+        title="код подставляет ${v}">${esc(v)}</span>`).join("")}</div>` : ""}
+    <div class="preview">${preview || '<span class="small">пусто</span>'}</div>
+    ${silent ? '<div class="small">Правка дойдёт до файла, но в сообщениях это поле не показывается.</div>' : ""}
+    <div class="meta"><span data-count></span></div>`;
+  return div;
+}
+function bindFieldEvents(scope) {
+  scope.querySelectorAll("textarea[data-field]").forEach(area => {
+    area.addEventListener("input", () => {
+      pathSet(S.draft, area.dataset.field, area.value);
+      saveDraft();
+      const box = area.closest(".field");
+      const preview = box.querySelector(".preview");
+      preview.innerHTML = allowedTags(esc(renderTemplate(area.value, S.schema.demo))) ||
+        '<span class="small">пусто</span>';
+      box.querySelector('[data-role="change"]')?.remove();
+      if (JSON.stringify(pathGet(S.loaded, box.dataset.path)) !== area.value) {
+        const head = box.querySelector(".fhead");
+        head.insertAdjacentHTML("afterbegin",
+          '<span class="badge" data-role="change">правка</span>');
+        if (!box.querySelector("[data-revert]")) {
+          const btn = document.createElement("button");
+          btn.className = "ghost"; btn.textContent = "вернуть"; btn.dataset.revert = "";
+          btn.addEventListener("click", () => revert(box.dataset.path));
+          head.append(btn);
+        }
+      }
+      box.classList.toggle("changed",
+        JSON.stringify(pathGet(S.loaded, box.dataset.path)) !== area.value);
+      box.querySelector("[data-count]").textContent =
+        `${area.value.length} символов · лимит сообщения ${S.schema.limits.text_chunk}`;
+    });
+    area.dispatchEvent(new Event("input"));
+    area.addEventListener("focus", () => area.select?.() && null);
+  });
+  scope.querySelectorAll(".chip[data-var]").forEach(chip => {
+    chip.addEventListener("click", () => {
+      const area = chip.closest(".field").querySelector("textarea[data-field]");
+      const at = area.selectionStart ?? area.value.length;
+      area.value = area.value.slice(0, at) + chip.dataset.var +
+                   area.value.slice(area.selectionEnd ?? at);
+      area.dispatchEvent(new Event("input"));
+      area.focus();
+    });
+  });
+  scope.querySelectorAll("[data-revert]").forEach(btn => {
+    btn.addEventListener("click", () => revert(btn.closest(".field").dataset.path));
+  });
+}
+function revert(path) {
+  const value = pathGet(S.loaded, path);
+  if (value === undefined) pathDelete(S.draft, path);
+  else pathSet(S.draft, path, value);
+  saveDraft();
+  render();
+}
+
+function renderNav() {
+  const nav = $("#nav");
+  nav.innerHTML = "";
+  const groups = S.schema.groups.filter(g => g.paths.length);
+  const label = (id, text, count) => {
+    const a = document.createElement("a");
+    a.textContent = text;
+    a.dataset.group = id;
+    if (count) a.innerHTML += ` <span class="n">${count}</span>`;
+    if (S.group === id) a.classList.add("active");
+    a.addEventListener("click", () => { S.group = id; render(); });
+    nav.append(a);
+  };
+  nav.insertAdjacentHTML("beforeend", "<b>Тексты по шагам</b>");
+  groups.forEach(g => label(g.id, g.title, g.paths.length));
+  nav.insertAdjacentHTML("beforeend", "<b>Каталог</b>");
+  [["spheres", "Сферы и специальности"], ["ops", "Рутина по сферам"],
+   ["tools", "Инструменты и бюджеты"], ["checklist", "Чек-лист внедрения"],
+   ["counts", "Кнопки количества"], ["meta", "Ссылка и служебное"]]
+    .forEach(([id, text]) => label(id, text));
+}
+
+function renderGroupTexts(group) {
+  const paths = group.paths.filter(p => !S.search ||
+    matchesSearch(p, pathGet(S.draft, p)));
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<h2>${esc(group.title)}</h2>
+    <p class="hint">Клик по чипу вставляет переменную. Серое поле под текстом —
+    так это увидит читатель: подстановка идёт значениями из примера, а не настоящими
+    цифрами пользователя.</p>`;
+  paths.forEach(path => card.append(fieldRow(path, pathGet(S.draft, path))));
+  if (!paths.length) card.innerHTML += '<p class="small">Ничего не найдено.</p>';
+  return card;
+}
+
+function numberField(container, label, value, onInput, hint) {
+  const wrap = document.createElement("div");
+  wrap.innerHTML = `<label>${esc(label)}</label>`;
+  const input = document.createElement("input");
+  input.type = "number"; input.step = "any"; input.value = value;
+  if (hint) input.title = hint;
+  input.addEventListener("input", () => onInput(input.value === "" ? "" : Number(input.value)));
+  wrap.append(input);
+  container.append(wrap);
+  return input;
+}
+function textField(container, label, value, onInput, hint) {
+  const wrap = document.createElement("div");
+  wrap.innerHTML = `<label>${esc(label)}${hint ? ` <span class="small">· ${esc(hint)}</span>` : ""}</label>`;
+  const input = document.createElement("input");
+  input.type = "text"; input.value = value ?? "";
+  input.addEventListener("input", () => onInput(input.value));
+  wrap.append(input);
+  container.append(wrap);
+  return input;
+}
+
+function renderSpheres() {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<h2>Сферы и специальности</h2>
+    <p class="hint">Названия сфер — кнопки шага 1, специальности — кнопки шага «кого
+    оптимизируем», зарплата делится на ${S.schema.limits.hours_per_month} рабочих
+    часов и даёт ставку в час. <b>Служебный id</b> менять нельзя: на него смотрит
+    расчёт и сохранённые сессии.</p>`;
+  S.draft.catalog.spheres.forEach((sphere, i) => {
+    const item = document.createElement("div");
+    item.className = "item";
+    const head = document.createElement("h3");
+    head.innerHTML = `${esc(sphere.label || "без названия")} ` +
+      `<span class="path">spheres[${i}] · id ${esc(sphere.id)}</span>`;
+    const add = document.createElement("button");
+    add.textContent = "+ специальность";
+    add.addEventListener("click", () => {
+      sphere.roles.push({id: "role_" + (sphere.roles.length + 1),
+                         label: "Новая специальность", salary: 80000});
+      saveDraft(); render();
+    });
+    head.append(add);
+    item.append(head);
+
+    const grid = document.createElement("div");
+    grid.className = "grid";
+    textField(grid, "Название сферы", sphere.label, v => { sphere.label = v; afterEdit(card); });
+    numberField(grid, "id (служебный)", sphere.id, v => { sphere.id = v; afterEdit(card); },
+                "латиница, без пробелов");
+    item.append(grid);
+    /* Blurb — справочник: код кладёт его в каталог, но в сообщениях не показывает. */
+    item.append(fieldRow(`catalog.spheres.${i}.blurb`, sphere.blurb ?? "",
+                         {title: "Описание сферы", rows: 2}));
+
+    sphere.roles.forEach((role, j) => {
+      const row = document.createElement("div");
+      row.className = "grid";
+      row.style.marginTop = "8px";
+      textField(row, "Специальность", role.label, v => { role.label = v; afterEdit(card); });
+      numberField(row, "Зарплата, ₽/мес", role.salary, v => { role.salary = v; afterEdit(card); });
+      textField(row, "id", role.id, v => { role.id = v; afterEdit(card); });
+      const del = document.createElement("button");
+      del.textContent = "удалить";
+      del.addEventListener("click", () => {
+        if (!confirm(`Убрать «${role.label}»?`)) return;
+        sphere.roles.splice(j, 1); saveDraft(); render();
+      });
+      row.append(del);
+      item.append(row);
+    });
+    card.append(item);
+  });
+  return card;
+}
+
+function renderOps() {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<h2>Рутина по сферам</h2>
+    <p class="hint">Часы в месяц — вход в расчёт: рутина = часы, стоимость = часы ×
+    ставка. Пояснение («как это выглядит руками») показывается под названием
+    операции в чате.</p>`;
+  S.draft.catalog.spheres.forEach((sphere, i) => {
+    const item = document.createElement("div");
+    item.className = "item";
+    const head = document.createElement("h3");
+    head.textContent = sphere.label || sphere.id;
+    const add = document.createElement("button");
+    add.textContent = "+ операция";
+    add.addEventListener("click", () => {
+      sphere.ops.push({id: "op_" + (sphere.ops.length + 1), label: "Новая рутина",
+                       hours: 10, detail: "что происходит каждый раз"});
+      saveDraft(); render();
+    });
+    head.append(add);
+    item.append(head);
+    sphere.ops.forEach((op, j) => {
+      const row = document.createElement("div");
+      row.className = "grid";
+      row.style.marginTop = "8px";
+      textField(row, "Операция", op.label, v => { op.label = v; afterEdit(card); });
+      numberField(row, "Часов в месяц", op.hours, v => { op.hours = v; afterEdit(card); });
+      textField(row, "Как это выглядит руками", op.detail, v => { op.detail = v; afterEdit(card); });
+      textField(row, "id", op.id, v => { op.id = v; afterEdit(card); });
+      const del = document.createElement("button");
+      del.textContent = "удалить";
+      del.addEventListener("click", () => {
+        if (!confirm(`Убрать «${op.label}»?`)) return;
+        sphere.ops.splice(j, 1); saveDraft(); render();
+      });
+      row.append(del);
+      item.append(row);
+    });
+    card.append(item);
+  });
+  return card;
+}
+
+function renderTools() {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<h2>Инструменты оптимизации</h2>
+    <p class="hint">Фактор — какую часть рутины забирает автоматизация (0…1);
+    факторы складываются как независимые события, потолок — 92%. Бюджет и поддержка
+    уходят в сообщение «стоимость внедрения» и в отчёт.</p>`;
+  S.draft.catalog.tools.forEach((tool, i) => {
+    const item = document.createElement("div");
+    item.className = "item";
+    item.innerHTML = `<h3>${esc(tool.label)} <span class="path">tools[${i}] · id ${esc(tool.id)}</span></h3>`;
+    const grid = document.createElement("div");
+    grid.className = "grid";
+    textField(grid, "Название", tool.label, v => { tool.label = v; afterEdit(card); });
+    numberField(grid, "Фактор 0…1", tool.factor, v => { tool.factor = v; afterEdit(card); });
+    numberField(grid, "Внедрение от, ₽", tool.impl[0], v => { tool.impl[0] = v; afterEdit(card); });
+    numberField(grid, "Внедрение до, ₽", tool.impl[1], v => { tool.impl[1] = v; afterEdit(card); });
+    numberField(grid, "Поддержка от, ₽/мес", tool.support[0], v => { tool.support[0] = v; afterEdit(card); });
+    numberField(grid, "Поддержка до, ₽/мес", tool.support[1], v => { tool.support[1] = v; afterEdit(card); });
+    item.append(grid);
+    const what = fieldRow(`catalog.tools.${i}.what`, tool.what, {title: "Что делает"});
+    what.querySelectorAll(".chips,.preview,.meta").forEach(n => n.remove());
+    item.append(what);
+    const pilot = fieldRow(`catalog.tools.${i}.pilot`, tool.pilot, {title: "С чего начать"});
+    pilot.querySelectorAll(".chips,.preview,.meta").forEach(n => n.remove());
+    item.append(pilot);
+    const del = document.createElement("button");
+    del.textContent = "убрать инструмент";
+    del.addEventListener("click", () => {
+      if (!confirm(`Убрать «${tool.label}» из списка?`)) return;
+      S.draft.catalog.tools.splice(i, 1); saveDraft(); render();
+    });
+    const add = document.createElement("button");
+    add.textContent = "+ инструмент";
+    add.addEventListener("click", () => {
+      S.draft.catalog.tools.push({id: "tool_" + (S.draft.catalog.tools.length + 1),
+        label: "Новый инструмент", factor: 0.5, impl: [50000, 150000],
+        support: [5000, 10000], what: "Что он делает", pilot: "С чего начать"});
+      saveDraft(); render();
+    });
+    item.append(del, add);
+    card.append(item);
+  });
+  const fire = S.draft.catalog.fire_tool;
+  const joke = document.createElement("div");
+  joke.className = "item";
+  joke.innerHTML = `<h3>Кнопка-шутка «Уволить всех» <span class="path">fire_tool · id неизменен</span></h3>`;
+  const g = document.createElement("div");
+  g.className = "grid";
+  textField(g, "Название кнопки", fire.label, v => { fire.label = v; afterEdit(joke); });
+  textField(g, "id (служебный, менять нельзя)", fire.id, () => {}, "зарезервирован расчётом");
+  joke.append(g);
+  card.append(joke);
+  return card;
+}
+
+function renderChecklist() {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<h2>Чек-лист внедрения</h2>
+    <p class="hint">В чате показывается короткая строка, в PDF и в заявке владельцу —
+    заголовок с пояснением. Переменные {first}, {second}, {pilot}, {tools} и
+    {first_hours} бот подставляет из реального расчёта пользователя.</p>`;
+  S.draft.catalog.checklist.forEach((step, i) => {
+    step.num = i + 1;
+    const item = document.createElement("div");
+    item.className = "item";
+    item.innerHTML = `<h3>Шаг ${i + 1} <span class="path">checklist[${i}]</span></h3>`;
+    const grid = document.createElement("div");
+    grid.className = "grid";
+    textField(grid, "Эмодзи", step.emoji, v => { step.emoji = v; afterEdit(item); });
+    textField(grid, "Срок", step.when, v => { step.when = v; afterEdit(item); });
+    item.append(grid);
+    ["title", "short", "body"].forEach(key => {
+      const row = fieldRow(`catalog.checklist.${i}.${key}`, step[key],
+                           {title: {title: "Заголовок (в PDF)", short: "Строка в чате",
+                                    body: "Пояснение (в PDF)"}[key], rows: key === "body" ? 3 : 1});
+      item.append(row);
+    });
+    const del = document.createElement("button");
+    del.textContent = "убрать шаг";
+    del.addEventListener("click", () => {
+      if (!confirm("Убрать шаг чек-листа?")) return;
+      S.draft.catalog.checklist.splice(i, 1); saveDraft(); render();
+    });
+    const down = document.createElement("button");
+    down.textContent = "ниже";
+    down.addEventListener("click", () => {
+      const a = S.draft.catalog.checklist;
+      if (i + 1 < a.length) [a[i], a[i + 1]] = [a[i + 1], a[i]];
+      saveDraft(); render();
+    });
+    const add = document.createElement("button");
+    add.textContent = "+ шаг после этого";
+    add.addEventListener("click", () => {
+      S.draft.catalog.checklist.splice(i + 1, 0, clone(step));
+      saveDraft(); render();
+    });
+    item.append(del, down, add);
+    card.append(item);
+  });
+  return card;
+}
+
+function renderCounts() {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<h2>Кнопки количества людей</h2>
+    <p class="hint">Подпись меняется, payload остаётся: по нему бот понимает, сколько
+    человек иметь в виду. Диапазоны («6–10» → 8) считает код — цифры здесь только для
+    справки.</p>`;
+  S.draft.catalog.count_buttons.forEach((row, i) => {
+    const line = document.createElement("div");
+    line.className = "grid";
+    row.forEach((pair, j) => {
+      const cell = document.createElement("div");
+      const label = textField(cell, `Ряд ${i + 1}, кнопка ${j + 1}`, pair[0],
+                              v => { pair[0] = v; afterEdit(card); });
+      const info = document.createElement("div");
+      info.className = "small";
+      info.textContent = `payload ${pair[1]} · в расчёте ${
+        S.draft.catalog.count_range[pair[1]] ?? "число сообщением"}`;
+      cell.append(info);
+      line.append(cell);
+    });
+    card.append(line);
+  });
+  return card;
+}
+
+function renderMeta() {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<h2>Ссылка и служебное</h2>
+    <p class="hint">Ссылка на канал стоит под финальным шагом. Переменная окружения
+    MAX_CHANNEL_URL в workflow сильнее файла: если её когда-нибудь зададут, админка
+    правит только content.json, а в проде останется значение из окружения.</p>`;
+  const row = fieldRow("meta.channel_url", S.draft.meta.channel_url,
+                       {title: "Ссылка на канал", mono: true, chips: false});
+  card.append(row);
+  /* Ставка «руковожу сам»: подпись коду не нужна (он берёт id и salary),
+     поэтому поле помечено как служебное. */
+  card.append(fieldRow("catalog.self_role.label", S.draft.catalog.self_role.label,
+                       {title: "Название роли «руковожу сам»", rows: 1}));
+  const note = document.createElement("div");
+  note.className = "small";
+  note.innerHTML = "Полные служебные поля (ставки, факторы, порядок шагов) живут в " +
+    "<code>content.py</code> и <code>optimizer.py</code> — их правит код, потому что " +
+    "из них считается результат.";
+  card.append(note);
+  return card;
+}
+
+function afterEdit(card) { saveDraft(); markChanged(card); }
+function markChanged(card) {
+  card.querySelectorAll?.(".field").forEach(f => {
+    const value = f.querySelector("textarea[data-field]")?.value;
+    f.classList.toggle("changed", JSON.stringify(pathGet(S.loaded, f.dataset.path)) !== value);
+  });
+}
+
+function matchesSearch(path, value) {
+  const q = S.search.toLowerCase();
+  return path.toLowerCase().includes(q) || String(value ?? "").toLowerCase().includes(q);
+}
+
+function render() {
+  if (!S.draft) return;
+  S.search = $("#search").value.trim();
+  renderNav();
+  const main = $("#main");
+  main.innerHTML = "";
+  const box = $("#problems");
+  if (box) box.remove();
+  const groupsById = Object.fromEntries(S.schema.groups.map(g => [g.id, g]));
+  const renderers = {spheres: renderSpheres, ops: renderOps, tools: renderTools,
+                     checklist: renderChecklist, counts: renderCounts, meta: renderMeta};
+  if (renderers[S.group]) main.append(renderers[S.group]());
+  else if (groupsById[S.group]) main.append(renderGroupTexts(groupsById[S.group]));
+  bindFieldEvents(main);
+  renderChangesPill();
+  validate();
+  if (S.warnings.length) showProblems(S.warnings, true);
+}
+
+/* ── Сохранение ────────────────────────────────────────────────────────────── */
+async function commit() {
+  const message = $("#commit-message").value.trim() ||
+    "Контент: правка из админки";
+  const body = {
+    message, branch: S.branch,
+    // GitHub ждёт обычный base64 (не url-safe); русские буквы — через UTF-8.
+    content: btoa(unescape(encodeURIComponent(
+      JSON.stringify(sortTree(S.draft), null, 2) + "\n")))
+  };
+  if (S.sha) body.sha = S.sha;
+  setStatus("отправляю…", "");
+  try {
+    if (!body.sha) {
+      const cur = await gh(`https://api.github.com/repos/${S.repo}/contents/${CONTENT_FILE}?ref=${S.branch}`);
+      body.sha = cur.sha;
+    }
+    const res = await gh(`https://api.github.com/repos/${S.repo}/contents/${CONTENT_FILE}`,
+                         {method: "PUT", body: JSON.stringify(body)});
+    S.sha = res.content.sha;
+    S.loaded = clone(S.draft);
+    sessionStorage.removeItem(KEYS.draft);
+    $("#dlg-commit").classList.remove("open");
+    setStatus(`коммит ${res.commit.sha.slice(0, 7)} записан`, "ok");
+    render();
+    const link = document.createElement("div");
+    link.className = "problems warn";
+    link.innerHTML = `<b>Правка в main.</b>
+      <div class="small" style="margin-top:4px">Коммит
+      <a href="${res.commit.html_url}" target="_blank">${res.commit.sha.slice(0, 7)}</a> ·
+      push уже поднял цикл бота — обычно новые тексты видны в чате через минуту-две,
+      предельный срок — 10 минут (длина одного круга). Откат — revert этого коммита
+      на GitHub, бот подхватит прежнее содержимое так же.</div>`;
+    $("#main").prepend(link);
+  } catch (e) {
+    setStatus("коммит не прошёл", "bad");
+    if (/409|conflict/i.test(String(e.message))) {
+      showProblems([ "В main уже лежит более новая версия файла — «Загрузить заново», " +
+                     "проверьте правки и сохраните снова." ]);
+    } else {
+      showProblems([String(e.message || e)]);
+    }
+  }
+}
+function sortTree(tree) {
+  /* Порядок групп тот же, что у tools/dump_content.py: schema, meta, texts, buttons, words, catalog. */
+  return {schema: tree.schema, meta: tree.meta, texts: tree.texts,
+          buttons: tree.buttons, words: tree.words, catalog: tree.catalog};
+}
+
+/* ── Обвязка интерфейса ────────────────────────────────────────────────────── */
+function openSettings() {
+  $("#set-repo").value = S.repo;
+  $("#set-token").value = S.token;
+  $("#set-branch").value = S.branch;
+  $("#dlg-settings").classList.add("open");
+}
+$("#btn-settings").addEventListener("click", openSettings);
+$("#set-close").addEventListener("click", () => $("#dlg-settings").classList.remove("open"));
+$("#set-save").addEventListener("click", () => {
+  S.repo = $("#set-repo").value.trim(); S.token = $("#set-token").value.trim();
+  S.branch = $("#set-branch").value.trim() || "main";
+  localStorage.setItem(KEYS.repo, S.repo);
+  localStorage.setItem(KEYS.token, S.token);
+  localStorage.setItem(KEYS.branch, S.branch);
+  $("#dlg-settings").classList.remove("open");
+  loadAll();
+});
+$("#set-forget").addEventListener("click", () => {
+  localStorage.removeItem(KEYS.token); S.token = "";
+  $("#set-token").value = "";
+  renderChangesPill();
+});
+$("#btn-start").addEventListener("click", () => S.token ? loadAll() : openSettings());
+$("#btn-reload").addEventListener("click", () => {
+  if (changedPaths().length &&
+      !confirm("Отменить несохранённые правки и перечитать файл из репозитория?")) return;
+  sessionStorage.removeItem(KEYS.draft);
+  loadAll();
+});
+$("#btn-check").addEventListener("click", () => {
+  const ok = validate();
+  showProblems([]);
+  if (!ok) {
+    showProblems(S.problems);
+    setStatus("есть ошибки", "bad");
+  } else {
+    if (S.warnings.length) showProblems(S.warnings, true);
+    setStatus(S.warnings.length ? "ошибок нет, есть замечания" : "ошибок нет",
+              S.warnings.length ? "warn" : "ok");
+  }
+  renderChangesPill();
+});
+$("#btn-save").addEventListener("click", () => {
+  const ok = validate();
+  if (!ok) { showProblems(S.problems); setStatus("есть ошибки — не сохраню", "bad"); return; }
+  const changed = changedPaths();
+  $("#commit-summary").innerHTML =
+    `<div class="small">Файл: <code>${CONTENT_FILE}</code> · ветка <code>${esc(S.branch)}</code></div>` +
+    `<ul>${changed.slice(0, 12).map(p => `<li><code>${esc(p)}</code></li>`).join("")}</ul>` +
+    (changed.length > 12 ? `<div class="small">…и ещё ${changed.length - 12}</div>` : "") +
+    (S.warnings.length ? `<div class="small" style="color:var(--warn)">Замечаний: ${S.warnings.length}</div>` : "");
+  const first = changed[0] || "правка";
+  $("#commit-message").value = "Контент: " + first.replace(/^catalog\.|\.label$/, "").slice(0, 60);
+  $("#dlg-commit").classList.add("open");
+});
+$("#commit-send").addEventListener("click", commit);
+$("#commit-close").addEventListener("click", () => $("#dlg-commit").classList.remove("open"));
+$("#search").addEventListener("input", () => { clearTimeout(window._t);
+  window._t = setTimeout(render, 200); });
+
+/* Старт: если токен уже сохранён — читаем сразу. */
+if (S.token) loadAll();
+</script>
+</body>
+</html>

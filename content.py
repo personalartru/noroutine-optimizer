@@ -1,0 +1,1102 @@
+"""Контент «Оптимизатора»: тексты, подписи кнопок и каталог — в одном месте.
+
+Модуль был нужен, чтобы админка на GitHub Pages могла править формулировки,
+кнопки и каталог, не трогая Python. Здесь живёт всё, что видит пользователь,
+плюс структура сфер/специальностей/операций/инструментов. Логика диалога и
+арифметика расчёта остаются в optimizer.py.
+
+Как это подключается:
+
+* ``DEFAULTS`` — то, что было в коде до админки. Резервный вариант: если
+  ``content.json`` битый, неполный или содержит ключ, которого не было, бот
+  берёт значение отсюда и печатает предупреждение в лог. Прод не падает из-за
+  опечатки в тексте.
+* ``content.json`` в корне репозитория — то, что правит админка. Workflow и так
+  делает checkout репозитория каждый цикл, поэтому новый коммит подхватывается
+  следующим кругом без единого нового секрета.
+* Порядок приоритета: окружение (``MAX_CHANNEL_URL``) → ``content.json`` →
+  ``DEFAULTS``.
+
+Формат строк — ``str.format`` с именованными переменными: ``"{sphere}"``,
+``"{money}"``. Имена переменных — контракт с кодом: админка показывает список
+доступных подстановок и не даёт сохранить шаблон с неизвестной переменной, а
+этот модуль при сбое подстановки отдаёт дефолт.
+"""
+import copy
+import json
+import os
+import re
+
+SCHEMA = 1
+
+# Рядом с модулем: в Actions это корень репозитория после checkout.
+CONTENT_FILE = os.environ.get("OPTIMIZER_CONTENT") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "content.json")
+
+CHANNEL_URL_DEFAULT = "https://max.ru/channel_noroutine"
+
+# Виды payload'ов, которые понимает dispatcher. Держится здесь, а не импортом из
+# optimizer.py, чтобы не раз circular import; tools/check_content.py сверяет это
+# множество с HANDLERS и не даёт разъехаться.
+ALLOWED_PAYLOAD_KINDS = {"s", "m", "r", "c", "n", "o", "t", "p", "fb",
+                         "reset", "again", "start", "cancel"}
+
+# ── Каталог: сферы, роли, рутина, инструменты ────────────────────────────────
+SPHERES = [
+    {
+        "id": "agency",
+        "label": "Digital / агентство",
+        "blurb": "брифы, правки и отчёты по проектам живут в чатах и почте",
+        "roles": [
+            {"id": "account", "label": "Аккаунт-менеджер", "salary": 90000},
+            {"id": "copy", "label": "Копирайтер", "salary": 70000},
+            {"id": "target", "label": "Таргетолог", "salary": 100000},
+            {"id": "design", "label": "Дизайнер", "salary": 85000},
+        ],
+        "ops": [
+            {"id": "brief", "label": "Сбор брифов и ТЗ", "hours": 20,
+             "detail": "один и тот же шаблон, правки клиента по кругу"},
+            {"id": "client", "label": "Переписка с клиентами", "hours": 22,
+             "detail": "вопросы про статус, сроки и стоимость заново каждый раз"},
+            {"id": "track", "label": "Контроль задач и сроков", "hours": 18,
+             "detail": "обход трекера, напоминания исполнителям"},
+            {"id": "report", "label": "Отчёты по проектам и часам", "hours": 14,
+             "detail": "выгрузки, сведение в таблицу, график для клиента"},
+            {"id": "assets", "label": "Передача макетов и материалов", "hours": 10,
+             "detail": "поиск файлов, ссылки, права доступа"},
+            {"id": "invoice", "label": "Счета и закрывающие документы", "hours": 10,
+             "detail": "по заявкам, отправка, загрузка в учётную систему"},
+        ],
+    },
+    {
+        "id": "ecom",
+        "label": "E-commerce",
+        "blurb": "карточки, отгрузки, отзывы и отчёты каждый день одними и теми же руками",
+        "roles": [
+            {"id": "support", "label": "Оператор поддержки", "salary": 60000},
+            {"id": "orders", "label": "Менеджер заказов", "salary": 75000},
+            {"id": "content", "label": "Контент-менеджер", "salary": 65000},
+            {"id": "market", "label": "Менеджер маркетплейсов", "salary": 90000},
+        ],
+        "ops": [
+            {"id": "cards", "label": "Заполнение и обновление карточек", "hours": 22,
+             "detail": "описания, характеристики, фото, цены по регламенту"},
+            {"id": "reviews", "label": "Ответы на отзывы и вопросы", "hours": 18,
+             "detail": "шаблоны, модерация, отработка негатива"},
+            {"id": "stock", "label": "Сверка остатков и заказов", "hours": 20,
+             "detail": "обход кабинетов, таблички, поиск расхождений"},
+            {"id": "ship", "label": "Оформление отгрузок и возвратов", "hours": 16,
+             "detail": "перенос данных из заявок в учётную систему, документы"},
+            {"id": "price", "label": "Контроль цен и конкурентов", "hours": 12,
+             "detail": "ежедневной ручной мониторинг листов и кабинетов"},
+            {"id": "report", "label": "Отчётность по продажам", "hours": 14,
+             "detail": "выгрузки из кабинетов, сведение в таблицу, график"},
+        ],
+    },
+    {
+        "id": "it",
+        "label": "IT / продукт",
+        "blurb": "фидбек, баг-репорты, бэклог и метрики разлетаются по чатам",
+        "roles": [
+            {"id": "l1", "label": "L1-поддержка", "salary": 65000},
+            {"id": "analyst", "label": "Аналитик", "salary": 130000},
+            {"id": "qa", "label": "Тестировщик", "salary": 110000},
+            {"id": "pm", "label": "Проджект-менеджер", "salary": 145000},
+        ],
+        "ops": [
+            {"id": "feedback", "label": "Разбор фидбека и баг-репортов", "hours": 20,
+             "detail": "чаты, почта, сториз — перенос в задачу с деталями"},
+            {"id": "backlog", "label": "Ведение бэклога и задач", "hours": 16,
+             "detail": "ручные апдейты статусов, приоритеты, комментарии"},
+            {"id": "metrics", "label": "Сбор метрик и отчётов", "hours": 14,
+             "detail": "запросы, выгрузки, сведение в дашборд вручную"},
+            {"id": "onboard", "label": "Онбординг и дожим клиентов", "hours": 15,
+             "detail": "шаблонные письма, контроль шагов, напоминания"},
+            {"id": "ticket", "label": "Контроль тикетов и статусов", "hours": 12,
+             "detail": "обход очереди, эскалации, ответы «где моя задача»"},
+            {"id": "release", "label": "Релизные заметки и комментарии", "hours": 8,
+             "detail": "сбор изменений, тексты, рассылка"},
+        ],
+    },
+    {
+        "id": "production",
+        "label": "Производство",
+        "blurb": "заявки, склад, смены и документы сходятся в одну таблицу у одного человека",
+        "roles": [
+            {"id": "dispatch", "label": "Диспетчер", "salary": 70000},
+            {"id": "supply", "label": "Менеджер закупок", "salary": 100000},
+            {"id": "store", "label": "Кладовщик", "salary": 60000},
+            {"id": "master", "label": "Мастер смены", "salary": 95000},
+        ],
+        "ops": [
+            {"id": "orders", "label": "Приём и распределение заявок", "hours": 20,
+             "detail": "телефон, чат, таблица — и снова по кругу"},
+            {"id": "stock", "label": "Сверка остатков на складе", "hours": 18,
+             "detail": "пересчёт, поиск расхождений, акты"},
+            {"id": "plan", "label": "Планирование смен и загрузки", "hours": 14,
+             "detail": "ручная расстановка людей и заказов по дням"},
+            {"id": "doc", "label": "Накладные, акты и ТТН", "hours": 12,
+             "detail": "заполнение, печать, отправка контрагентам"},
+            {"id": "supply", "label": "Контроль поставок и оплат", "hours": 12,
+             "detail": "напоминания поставщикам, сверка документов"},
+            {"id": "report", "label": "Отчёты по простоям и браку", "hours": 10,
+             "detail": "выгрузка из учётки, сведение в таблицу"},
+        ],
+    },
+    {
+        "id": "services",
+        "label": "Услуги / бьюти",
+        "blurb": "запись, напоминания и ответы в мессенджерах отнимают весь день у администратора",
+        "roles": [
+            {"id": "admin", "label": "Администратор", "salary": 55000},
+            {"id": "dispatch", "label": "Диспетчер заявок", "salary": 65000},
+            {"id": "content", "label": "Контент-менеджер", "salary": 60000},
+            {"id": "market", "label": "Маркетолог", "salary": 95000},
+        ],
+        "ops": [
+            {"id": "record", "label": "Запись и переносы клиентов", "hours": 22,
+             "detail": "телефон, WhatsApp, календарь — одно и то же по десять раз"},
+            {"id": "chat", "label": "Ответы в мессенджерах и звонки", "hours": 20,
+             "detail": "прайс, свободные окна, адрес, как записаться"},
+            {"id": "remind", "label": "Напоминания о визите", "hours": 14,
+             "detail": "ручная рассылка накануне, подтверждение"},
+            {"id": "revenue", "label": "Отчёт по выручке и загрузке", "hours": 10,
+             "detail": "выгрузка из CRM, сведение в таблицу"},
+            {"id": "social", "label": "Посты и сторис по шаблону", "hours": 10,
+             "detail": "одинаковые рубрики, ручная публикация"},
+            {"id": "supply", "label": "Закупка расходников", "hours": 8,
+             "detail": "остатки, заявка поставщику, сверка"},
+        ],
+    },
+    {
+        "id": "finance",
+        "label": "Финансы / учёт",
+        "blurb": "первичка, платежи и сверки приходят каждый день и каждый день их кто-то ищет руками",
+        "roles": [
+            {"id": "account", "label": "Бухгалтер", "salary": 85000},
+            {"id": "check", "label": "Оператор сверок", "salary": 65000},
+            {"id": "finman", "label": "Финменеджер", "salary": 130000},
+            {"id": "kadro", "label": "Кадровик", "salary": 70000},
+        ],
+        "ops": [
+            {"id": "primary", "label": "Сбор и сверка первички", "hours": 24,
+             "detail": "почта, ЭДО, папки, поиск недостающих документов"},
+            {"id": "bank", "label": "Разнос платежей и выписок", "hours": 18,
+             "detail": "ручное отнесение, назначения, разбивки"},
+            {"id": "invoice", "label": "Счета, акты и УПД", "hours": 14,
+             "detail": "создание документов по заявкам, отправка клиентам"},
+            {"id": "budget", "label": "Отчёты по расходам и бюджету", "hours": 14,
+             "detail": "выгрузки, сведение план/факта в таблицу"},
+            {"id": "close", "label": "Закрытие периода и реконсиляция", "hours": 16,
+             "detail": "сверки с контрагентами, поиск расхождений"},
+            {"id": "remind", "label": "Напоминания по оплатам", "hours": 10,
+             "detail": "контроль дебиторки, письма и звонки"},
+        ],
+    },
+    {
+        "id": "marketing",
+        "label": "Маркетинг",
+        "blurb": "заявки приходят из пяти источников, и каждую кто-то открывает, копирует и прозванивает",
+        "roles": [
+            {"id": "target", "label": "Таргетолог", "salary": 100000},
+            {"id": "smm", "label": "SMM-менеджер", "salary": 70000},
+            {"id": "content", "label": "Контент-менеджер", "salary": 65000},
+            {"id": "analyst", "label": "Маркетинговый аналитик", "salary": 120000},
+        ],
+        "ops": [
+            {"id": "leads", "label": "Разбор заявок из форм и чатов", "hours": 24,
+             "detail": "открыть почту или таблицу, перенести в CRM, поставить статус"},
+            {"id": "crm", "label": "Перенос лидов между системами", "hours": 16,
+             "detail": "копирование полей, дедупликация, ручные комментарии"},
+            {"id": "camp", "label": "Сбор отчётов по кампаниям", "hours": 14,
+             "detail": "выгрузки из кабинетов, сведение CPL/ДРР в таблицу"},
+            {"id": "social", "label": "Ответы в комментах и директе", "hours": 15,
+             "detail": "одни и те же вопросы про цену, сроки, адрес"},
+            {"id": "brief", "label": "ТЗ креативам и подрядчикам", "hours": 12,
+             "detail": "повторяющиеся брифы, правки, контроль сроков"},
+            {"id": "pay", "label": "Контроль оплат и документов", "hours": 10,
+             "detail": "сверка актов, напоминания, загрузка в учётную систему"},
+        ],
+    },
+]
+
+TOOLS = [
+    {"id": "chat", "label": "Чат-бот", "factor": 0.65,
+     "impl": [60000, 150000], "support": [8000, 15000],
+     "what": "бот закрывает повторяющиеся обращения и заявки: отвечает по "
+             "сценариям, собирает данные и кладёт их туда, где нужно",
+     "pilot": "перевести 5–10 самых частых вопросов на сценарии бота"},
+    {"id": "agent", "label": "AI-агент", "factor": 0.85,
+     "impl": [90000, 250000], "support": [15000, 30000],
+     "what": "модель читает входящее сообщение или документ, понимает смысл, "
+             "готовит черновик ответа и передаёт человеку только спорное",
+     "pilot": "автоответы и суммаризация обращений с проверкой человеком"},
+    {"id": "n8n", "label": "n8n-воркфлоу", "factor": 0.75,
+     "impl": [40000, 120000], "support": [5000, 12000],
+     "what": "связки между системами: заявка → задача → уведомление → отчёт, "
+             "без копирования поля из окна в окно",
+     "pilot": "сквозная связка «источник → система → уведомление»"},
+    {"id": "tracker", "label": "Интеграция Яндекс Трекер", "factor": 0.5,
+     "impl": [30000, 90000], "support": [4000, 10000],
+     "what": "задачи создаются сами: из форм, чатов и писем, с полями, "
+             "исполнителем и автоматическими статусами",
+     "pilot": "вебхук на создание задач плюс автоназначение и уведомления"},
+    {"id": "full", "label": "Комплексная автоматизация", "factor": 0.9,
+     "impl": [200000, 500000], "support": [25000, 50000],
+     "what": "контур процесса целиком: бот + воркфлоу + трекер + дашборды, "
+             "человек остаётся только на исключениях",
+     "pilot": "один процесс от входа заявки до отчёта, потом тираж на соседние"},
+]
+
+FIRE_TOOL = {"id": "fire", "label": "Уволить всех 🙂", "factor": 1.0,
+             "what": "радикальный метод, который мы не рекомендуем"}
+
+# Кнопки количества: 1–5 отдельными кнопками, дальше диапазоны-оценки.
+# Подпись правится из админки, payload — только на существующий вид: клавиатуру
+# без поля "type" MAX молча выбрасывает целиком, а на неизвестный opt: шаге
+# бот отвечает «не распознал кнопку».
+COUNT_BUTTONS = [
+    [["1", "opt:c:1"], ["2", "opt:c:2"], ["3", "opt:c:3"],
+     ["4", "opt:c:4"], ["5", "opt:c:5"]],
+    [["6–10", "opt:c:8"], ["11–25", "opt:c:18"]],
+    [["Своё число", "opt:c:x"]],
+]
+# диапазоны считаем по середине оценки
+COUNT_RANGE = {"opt:c:8": 8, "opt:c:18": 18}
+
+# Переменные, которые код передаёт полям элементов каталога. Админка по этому
+# списку показывает доступные подстановки и не даёт сохранить {name}, которого
+# нет: fill() оставил бы его в сообщении на глазах у пользователя.
+CATALOG_VARS = {
+    "checklist": ["first", "first_hours", "second", "pilot", "tools"],
+}
+
+# Семь шагов внедрения — один источник для чата, PDF и текстового запасного
+# варианта. `short` — строка в чате, `body` — пояснение только для PDF.
+CHECKLIST = [
+    {
+        "emoji": "📝",
+        "title": "Зафиксировать процесс как есть",
+        "short": "Зафиксировать процесс",
+        "body": "Опишите «{first}» по шагам: кто начинает, где живут "
+                "данные, что значит «готово».",
+        "when": "0,5 дня",
+    },
+    {
+        "emoji": "🎯",
+        "title": "Выбрать один пилот",
+        "short": "Пилот: «{first}» ({first_hours} ч/мес)",
+        "body": "Берём самое дорогое — «{first}» ({first_hours} ч/мес на "
+                "человека): {pilot}. Остальное после первого результата.",
+        "when": "1 неделя",
+    },
+    {
+        "emoji": "🔑",
+        "title": "Подготовить данные и доступы",
+        "short": "Данные, доступы, права",
+        "body": "Регламенты, таблицы-источники, API-ключи и права, ответственный "
+                "за исключения.",
+        "when": "2–3 дня",
+    },
+    {
+        "emoji": "🛠",
+        "title": "Собрать MVP и гонять рядом с руками",
+        "short": "MVP рядом с руками",
+        "body": "Первая версия ({tools}) работает вместе с человеком: "
+                "автомат делает, человек правит правила — так находятся крайние "
+                "случаи.",
+        "when": "1–2 недели",
+    },
+    {
+        "emoji": "📏",
+        "title": "Замерить часы до и после",
+        "short": "Замер до и после",
+        "body": "Сколько уходило и сколько осталось. Только замер отличает "
+                "«кажется, быстрее» от реальной экономии.",
+        "when": "2 недели",
+    },
+    {
+        "emoji": "🧭",
+        "title": "Передать владельцу и задокументировать",
+        "short": "Ответственный и инструкция",
+        "body": "Кто правит сценарии, куда писать при сбое, как добавить операцию.",
+        "when": "1 день",
+    },
+    {
+        "emoji": "📈",
+        "title": "Тиражировать",
+        "short": "Тираж: «{second}» и остальное",
+        "body": "По «{first}» есть цифра — добавляем «{second}» и "
+                "остальное из расчёта: они встают на готовый контур дешевле.",
+        "when": "1–2 недели на операцию",
+    },
+]
+
+# ── Тексты ──────────────────────────────────────────────────────────────────
+TEXTS = {
+    "intro": (
+        "Оптимизатор — бот, который помогает оптимизировать ваши рабочие процессы.\n\n"
+        "Шесть коротких вопросов. На выходе: часы рутины, их стоимость, экономия "
+        "и чек-лист внедрения.\n\n<b>Шаг 1 из 6 · Сфера деятельности</b>"
+    ),
+    "people_phrase": "{count} {word}",
+    "mode": {
+        "body": "<b>{sphere}</b> — принято.\n\n"
+                "<b>Шаг 2 из 6 · Кого оптимизируем?</b>\n"
+                "Вся рутина на вас — жмите «Только я».",
+    },
+    "roles": {
+        "title": "<b>Шаг 2 из 6 · Отметьте специалистов</b>",
+        "hint": "Можно несколько галочек — потом спрошу, сколько человек в каждой роли.",
+        "picked": "Отмечено: {picked}.",
+    },
+    "count": {
+        "body": "<b>{role}</b> — сколько таких?\n"
+                "Ставка {rate}/ч.{further}\n"
+                "Кнопки 1–5, «6–10», «11–25» — или число сообщением.",
+        "left": " Дальше ещё {n} {word}.",
+        "ask": "Сколько человек в роли «{role}»? Напишите число, например 7.",
+    },
+    "team": {
+        "body": "Команда: {roles}.\nВ расчёте <b>{people}</b>.",
+        "self": "вы один, всё на вас",
+        "pair": "{label} × {count}",
+    },
+    "ops": {
+        "title": "<b>Шаг 3 из 6 · Что повторяете руками?</b>",
+        "hint": "Отмечайте повторы, тап ещё раз — снять отметку.",
+        "item": "{mark} {i}. {label} · {hours} ч/мес",
+        "footer": "Отмечено {n} {word} — <b>{hours} ч/мес</b> на человека.",
+    },
+    "routine": {
+        "head": "<b>Шаг 4 из 6 · Что получилось</b>\n\n"
+                "{sphere}, {who}. Повторов — <b>{per_person} ч/мес на человека</b>, "
+                "это ~{share}% месяца.\n\n"
+                "Операции в расчёте:\n{ops}",
+        "item": "• {label} — <b>{hours} ч/мес</b> на человека ({detail})",
+        "figures": "<b>Часы рутины:</b> {hours} ч/мес на {people} · "
+                   "{hours_year} ч/год\n"
+                   "<b>Стоимость:</b> ~<b>{cost_month}/мес</b> по ставке "
+                   "{rate}/ч · {cost_year} в год",
+    },
+    "tools": {
+        "title": "<b>Шаг 5 из 6 · Чем убираем рутину?</b>",
+        "hint": "Отметьте то, что реально рассматриваете — можно несколько, "
+                "эффекты складываются.",
+        "item": "{mark} {i}. {label} — до {pct}% времени рутины",
+        "fire_item": "▫️ {i}. {label} — в расчёт не пойдёт",
+        "footer": "Рутины сейчас: <b>{hours} ч/мес</b>.",
+    },
+    "savings": {
+        "head": "<b>Шаг 6 из 6 · Экономия</b>\n\n"
+                "<b>Инструменты:</b> {names}\n"
+                "<b>Забираем:</b> {pct}% времени рутины "
+                "(потолок честной автоматизации ~92% — исключения всегда остаются)\n\n"
+                "• Часы: {hours} → {after} ч/мес руками, экономия "
+                "<b>{saved} ч/мес</b> · {saved_year} ч/год\n"
+                "• Деньги: <b>{money_month}/мес</b> · {money_year} в год\n"
+                "• На человека: <b>{freed} ч/мес</b> свободно — "
+                "~{freed_pct}% его месяца",
+        "top_title": "<b>Что освобождается первым:</b>",
+        "top_item": "• {label} ({hours} ч/мес на человека): {detail}",
+    },
+    "fire": {
+        "body": "«Уволить всех» — и рутина исчезнет вместе с процессом 🙂\n\n"
+                "<b>Экономия 100% часов: {money}/мес.</b>\n\n"
+                "Минус: вместе с часами уйдут заявки, клиенты и отчётность. Шутка — "
+                "но ровно про масштаб проблемы: рутину надо убирать совсем, а не "
+                "делать быстрее.\n\n"
+                "В расчёт не беру — отмечайте настоящие инструменты.",
+    },
+    "checklist": {
+        "title": "<b>Чек-лист внедрения</b>",
+        "item": "{i}. {emoji} {short} — <i>{when}</i>",
+        "hint": "Пояснения к каждому шагу, расчёт и бюджет — кнопкой «{pdf}» ниже.",
+        "full_title": "<b>Чек-лист внедрения — подробно</b>",
+        "full_item": "<b>{i}. {title}</b> — {body}\n   <i>{when}</i>",
+        # чем заменить динамику, когда в расчёте нечего подставить: одна операция
+        # в выборе — «второй» операции нет, инструментов нет — «связок» нет
+        "fallback_first": "повторяющаяся операция",
+        "fallback_second": "соседние операции",
+        "fallback_pilot": "переводим шаг в сценарий",
+        "fallback_tools": "связки",
+    },
+    "rollout": {
+        "head": "<b>Стоимость внедрения</b>\n\n"
+                "{what}\n\n<b>Примерный бюджет:</b> {budget} разово.{support}{payback}",
+        "item": "• <b>{label}</b>: {what}",
+        "support": "\n<b>Сопровождение:</b> {low}–{high}/мес.",
+        "payback": "\nСредний бюджет окупается за <b>~{months} мес</b> при экономии "
+                   "{money}/мес.",
+        "disclaimer": "<b>Дисклеймер.</b> Расчёт ориентировочный: часы и ставки — из "
+                      "ваших ответов и средних по рынку, бюджет — типовой диапазон. "
+                      "Не оферта и не гарантия экономии; точная оценка — после "
+                      "разбора процесса.",
+        "cta": "\n\nХотите конкретный план под ваш процесс — отправьте заявку "
+               "кнопкой ниже.",
+    },
+    "pdf": {
+        "preparing": "Готовлю полный отчёт: рутина по операциям, экономия, бюджет "
+                     "и чек-лист с пояснениями.",
+        "needs_steps": "PDF собирается из вашего расчёта — сначала пройдём шаги. "
+                       "Начнём с сферы деятельности?",
+    },
+    "report": {
+        "title": "Отчёт оптимизатора · {sphere}",
+        "title_fallback": "Отчёт оптимизатора",
+        "topline": "{date} · расчёт «Оптимизатора»",
+        "people_line": "{people} чел",
+        "headline": "{hours} ч/мес рутины · {cost}/мес",
+        "rate": "{rate}/ч",
+        "hours_value": "{hours} ч/мес",
+        "percent_value": "{pct}%",
+        "money_value": "{money}/мес · {year}/год",
+        "tool_value": "{low}–{high} разово",
+        "impl_value": "{low}–{high} разово",
+        "support_value": "{low}–{high}/мес",
+        "payback_value": "~{months} мес",
+        "none": "—",
+        "figure_routine": "Рутина сейчас",
+        "figure_take": "Забираем автоматизацией",
+        "figure_saving": "Экономия",
+        "figure_money": "В деньгах",
+        "figure_freed": "Освобождается на человека",
+        "figure_payback": "Окупаемость",
+        "budget_impl": "Бюджет внедрения",
+        "budget_support": "Сопровождение",
+        "section_ops": "Рутина по операциям",
+        "section_saving": "Экономия",
+        "section_tools": "Инструменты и бюджет",
+        "section_checklist": "Чек-лист внедрения",
+        "section_howto": "Как читать цифры",
+        "empty_ops": "Операции не выбраны.",
+        "channel_line": "Разборы и готовые связки: {channel}",
+    },
+    "feedback": {
+        "prompt": "Опишите процесс одним сообщением: что делаете руками, в каких "
+                  "системах, сколько это времени. Контакт, если нужен ответ.\n\n"
+                  "Перешлю в штаб оптимизации: такие запросы он разбирает сам.",
+        "done": "Отправил в штаб оптимизации вместе с вашим расчётом — обычно отвечаем "
+                "в течение дня.\n\nПересчитать другой процесс — «Оптимизатор заново» "
+                "ниже.",
+        "draft": "\n\nЧерновик расчёта: {sphere} · {people} чел · {hours} ч/мес "
+                 "рутины · ~{cost}/мес.",
+    },
+    "stale": "Похоже, это кнопка из прошлого расчёта. Нажмите «Начать заново» — "
+             "пойдём с начала.",
+    "cancel": "Оптимизатор остановил. Продолжить — «Начать заново» или /старт.",
+    "unknown_button": "Не распознал кнопку — нажмите «Начать заново», чтобы начать "
+                      "заново.",
+    # Встреча: бот отвечает на /старт, на неизвестную команду и на кнопку,
+    # которую не распознал транспорт. Подпись кнопки рядом — buttons.start.
+    "start_hint": "Я Оптимизатор: шесть коротких вопросов — и на выходе часы "
+                  "рутины, их стоимость, экономия и чек-лист внедрения.\n\n"
+                  "Напишите /старт — и поехали.",
+    "errors": {
+        "no_sphere": "Такой сферы нет в списке — выберите из кнопок.",
+        "sphere_first": "Сначала выберите сферу — кнопки выше.",
+        "no_role_pick": "Отметьте хотя бы одного специалиста — кнопки выше, можно "
+                        "сразу несколько.",
+        "bad_role": "Специальность не распознана — выберите из списка.",
+        "bad_count": "Не понял количество — выберите кнопку 1–5 или напишите число "
+                     "сообщением.",
+        "need_number": "Нужно число — например «7» или «примерно 12». Кнопки 1–5 тоже "
+                       "работают.",
+        "no_op_pick": "Отметьте хотя бы одну операцию — иначе считать нечего. Можно "
+                      "начать заново кнопкой внизу.",
+        "bad_op": "Такой операции нет в списке — выберите из кнопок.",
+        "no_tool_pick": "Выберите инструмент 🙂 «Уволить всех» тоже считается.",
+        "bad_tool": "Такого инструмента нет в списке.",
+    },
+}
+
+# ── Подписи кнопок и отметки ─────────────────────────────────────────────────
+BUTTONS = {
+    "marks": {"on": "✅", "off": "▫️"},
+    "reset": "🔄 Начать заново",
+    "start": "🔧 Начать расчёт",
+    "mode": {"self": "Только я", "team": "Несколько человек"},
+    "roles": {"ok": "Сколько их?", "clear": "Сбросить выбор",
+              "item": "{mark} {label} · {rate}/ч"},
+    # подписи кнопок количества живут в catalog.count_buttons (там же, где и
+    # payload'ы), а кнопка «Уволить всех» — в catalog.fire_tool.label: один
+    # источник на каждую надпись, иначе правка в одном месте молча не применяется.
+    "more": {"add": "Добавить специальность", "calc": "Считаем рутину"},
+    "ops": {"ok": "Посчитать рутину", "clear": "Сбросить выбор",
+            "item": "{mark} {label} · {hours} ч"},
+    "tools": {"ok": "Показать экономию", "clear": "Сбросить",
+              "item": "{mark} {label}",
+              "plan": "Дальше: чек-лист внедрения",
+              "back": "Выбрать другие инструменты"},
+    "final": {"pdf": "📄 Полный отчёт (PDF)", "lead": "💬 Отправить заявку",
+              "again": "Пройти заново"},
+    "after_lead": {"again": "🔧 Оптимизатор заново",
+                   "channel": "Канал про автоматизацию"},
+}
+
+WORDS = {
+    "people": ["человек", "человека", "человек"],
+    "roles": ["роль", "роли", "ролей"],
+    "ops": ["операция", "операции", "операций"],
+}
+
+META = {
+    "channel_url": CHANNEL_URL_DEFAULT,
+    # Поля, которых человек в чате не видит: код берёт их как справочник (ставка
+    # «я сам», служебные id), а не как подпись. Админка показывает рядом с ними
+    # пометку «не влияет на сообщения» — иначе владельцу кажется, что правка
+    # «не применилась», хотя она просто никуда не выводится.
+    "internal": ["catalog.self_role.label", "catalog.spheres[].blurb"],
+}
+
+DEFAULTS = {
+    "schema": SCHEMA,
+    "meta": META,
+    "texts": TEXTS,
+    "buttons": BUTTONS,
+    "words": WORDS,
+    "catalog": {
+        "self_role": {"label": "Я сам (руковожу и делаю руками)", "salary": 120000},
+        "spheres": SPHERES,
+        "tools": TOOLS,
+        "fire_tool": FIRE_TOOL,
+        "count_buttons": COUNT_BUTTONS,
+        "count_range": COUNT_RANGE,
+        "checklist": CHECKLIST,
+    },
+}
+
+DEMO_VALUES = {
+    "sphere": "Услуги / бьюти", "who": "Администратор × 2", "picked": "Администратор",
+    "role": "Администратор", "rate": "340 ₽", "further": " Дальше ещё 1 роль.",
+    "n": 1, "count": 2, "word": "роль", "roles": "Администратор × 2",
+    "people": "2 человека", "date": "3 ноября 2026",
+    "mark": "▫️", "i": 1, "label": "Запись и переносы клиентов", "hours": 22,
+    "detail": "телефон, WhatsApp, календарь — одно и то же по десять раз",
+    "per_person": 52, "share": 33, "ops": "• …", "pct": 65, "after": 391,
+    "saved": 732, "saved_year": "8 784", "money_month": "249 423 ₽",
+    "money_year": "2 993 070 ₽", "freed": "366 ч/мес", "freed_pct": 229,
+    "hours_year": "24 960", "cost_month": "383 726 ₽", "cost_year": "4 604 712 ₽",
+    "names": "Чат-бот, n8n-воркфлоу", "what": "бот закрывает обращения",
+    "budget": "100 000–270 000 ₽", "support": "", "payback": "", "low": "100 000 ₽",
+    "high": "270 000 ₽", "months": "1,2", "money": "249 423 ₽", "year": "2 993 070 ₽",
+    "cost": "383 726 ₽", "title": "Выбрать один пилот", "body": "Берём самое дорогое",
+    "when": "1 неделя", "emoji": "🎯", "short": "Пилот: «Запись» (22 ч/мес)",
+    "pdf": "📄 Полный отчёт (PDF)", "channel": "https://max.ru/channel_noroutine",
+    "first": "Запись и переносы клиентов", "first_hours": 22,
+    "second": "Ответы в мессенджерах", "pilot": "перевести частые вопросы на бота",
+    "tools": "чат-бот, n8n-воркфлоу",
+}
+
+STATE = {"content": None, "warnings": []}
+
+# {{ }} — экранированные фигурные скобки, их в подстановки считать нельзя.
+BRACE_RE = re.compile(r"(?<!{)\{([a-z_][a-z0-9_]*)(?![{])")
+
+
+# ── Загрузка и слияние ───────────────────────────────────────────────────────
+def _merge(base, overlay, path, warnings):
+    """Словари сливаются по ключам, списки и строки заменяются целиком.
+
+    Ключа, которого нет в ``DEFAULTS``, не существует для кода — он игнорируется
+    с предупреждением, чтобы опечатка в имени не выглядела «правка не применилась».
+    """
+    if not isinstance(overlay, dict):
+        warnings.append(f"{path or 'content'}: ожидался объект — игнорирую")
+        return copy.deepcopy(base)
+    merged = copy.deepcopy(base)
+    for key, value in overlay.items():
+        where = f"{path}.{key}" if path else key
+        if key not in base:
+            warnings.append(f"{where}: ключ незнаком коду — пропускаю")
+            continue
+        if isinstance(base[key], dict) and isinstance(value, dict):
+            merged[key] = _merge(base[key], value, where, warnings)
+        elif isinstance(base[key], dict) or isinstance(value, dict):
+            warnings.append(f"{where}: не тот тип — беру код-дефолт")
+        else:
+            merged[key] = value
+    return merged
+
+
+_INDEX_RE = re.compile(r"^([a-z_][a-z0-9_]*)((?:\[\d+\])*)$")
+
+
+def _dig(tree, dotted):
+    """Значение по пути «spheres[0].roles.label»; индексы списков поддерживаются."""
+    node = tree
+    for part in dotted.split("."):
+        match = _INDEX_RE.match(part)
+        if not match:
+            return None
+        key, brackets = match.group(1), match.group(2)
+        if not isinstance(node, dict) or key not in node:
+            return None
+        node = node[key]
+        for index in re.findall(r"\[(\d+)\]", brackets):
+            if not isinstance(node, list) or int(index) >= len(node):
+                return None
+            node = node[int(index)]
+    return node
+
+
+# ── Валидация каталога ───────────────────────────────────────────────────────
+def _num(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _payload_ok(payload):
+    if not isinstance(payload, str) or not payload.startswith("opt:"):
+        return False
+    parts = payload.split(":")
+    return len(parts) >= 2 and parts[1] in ALLOWED_PAYLOAD_KINDS
+
+
+def _valid_label(item, where, errors):
+    if not isinstance(item, dict):
+        errors.append(f"{where}: ожидался объект")
+        return False
+    for field in ("id", "label"):
+        if not isinstance(item.get(field), str) or not item.get(field).strip():
+            errors.append(f"{where}.{field}: нужна непустая строка")
+            return False
+    return True
+
+
+def _validate_catalog(cat, errors):
+    """Структура каталога, без которой расчёт врёт или клавиатура исчезает.
+
+    Проверяются id (уникальность — на них держатся payload'ы), подписи и числа
+    там, где арифметика. Непрошедшая валидация = каталог целиком игнорируется,
+    бот остаётся на код-дефолтах: частичный каталог опаснее отсутствующего.
+    """
+    role = _dig(cat, "self_role")
+    if not isinstance(role, dict) or not str(role.get("label") or "").strip():
+        errors.append("catalog.self_role.label: пусто")
+    elif not _num(role.get("salary")) or role["salary"] <= 0:
+        errors.append("catalog.self_role.salary: нужно положительное число")
+
+    spheres = _dig(cat, "spheres")
+    if not isinstance(spheres, list) or not spheres:
+        errors.append("catalog.spheres: пустой список сфер")
+        spheres = []
+    seen = set()
+    for index, sphere in enumerate(spheres):
+        where = f"catalog.spheres[{index}]"
+        if not _valid_label(sphere, where, errors):
+            continue
+        if sphere["id"] in seen:
+            errors.append(f"{where}.id: дубликат {sphere['id']}")
+        seen.add(sphere["id"])
+        if not str(sphere.get("blurb") or "").strip():
+            errors.append(f"{where}.blurb: пусто")
+        for kind, fields in (("roles", ("salary",)), ("ops", ("hours", "detail"))):
+            items = sphere.get(kind)
+            if not isinstance(items, list) or not items:
+                errors.append(f"{where}.{kind}: пусто — шаг нечего показывать")
+                continue
+            inner = set()
+            for j, item in enumerate(items):
+                spot = f"{where}.{kind}[{j}]"
+                if not _valid_label(item, spot, errors):
+                    continue
+                if item["id"] in inner:
+                    errors.append(f"{spot}.id: дубликат {item['id']} в сфере")
+                inner.add(item["id"])
+                for field in fields:
+                    value = item.get(field)
+                    if field == "detail":
+                        if not str(value or "").strip():
+                            errors.append(f"{spot}.detail: пусто")
+                    elif not _num(value) or value <= 0:
+                        errors.append(f"{spot}.{field}: нужно положительное число")
+
+    tools = _dig(cat, "tools")
+    if not isinstance(tools, list) or not tools:
+        errors.append("catalog.tools: пустой список инструментов")
+        tools = []
+    seen = set()
+    for index, tool in enumerate(tools):
+        where = f"catalog.tools[{index}]"
+        if not _valid_label(tool, where, errors):
+            continue
+        if tool["id"] in seen:
+            errors.append(f"{where}.id: дубликат {tool['id']}")
+        seen.add(tool["id"])
+        factor = tool.get("factor")
+        if not _num(factor) or not 0 < factor <= 1:
+            errors.append(f"{where}.factor: доля рутины, число 0…1")
+        for field in ("impl", "support"):
+            pair = tool.get(field)
+            if (not isinstance(pair, list) or len(pair) != 2
+                    or not all(_num(x) and x >= 0 for x in pair)
+                    or pair[0] > pair[1]):
+                errors.append(f"{where}.{field}: нужно [min, max] без инверсии")
+        for field in ("what", "pilot"):
+            if not str(tool.get(field) or "").strip():
+                errors.append(f"{where}.{field}: пусто")
+
+    fire = _dig(cat, "fire_tool")
+    if not isinstance(fire, dict) or fire.get("id") != "fire":
+        errors.append("catalog.fire_tool.id: должен остаться \"fire\" — на него "
+                      "смотрит расчёт")
+    elif not str(fire.get("label") or "").strip() or not _num(fire.get("factor")):
+        errors.append("catalog.fire_tool: нужны label и factor")
+
+    rows = _dig(cat, "count_buttons")
+    if not isinstance(rows, list) or not rows:
+        errors.append("catalog.count_buttons: пусто")
+        rows = []
+    payloads = []
+    for i, row in enumerate(rows):
+        if not isinstance(row, list) or not row:
+            errors.append(f"catalog.count_buttons[{i}]: пуста строка")
+            continue
+        for j, item in enumerate(row):
+            spot = f"catalog.count_buttons[{i}][{j}]"
+            if (not isinstance(item, list) or len(item) != 2
+                    or not str(item[0] or "").strip() or not _payload_ok(item[1])):
+                errors.append(f"{spot}: нужно [подпись, \"opt:вид:аргумент\"]")
+                continue
+            payloads.append(item[1])
+    ranges = _dig(cat, "count_range")
+    if not isinstance(ranges, dict):
+        errors.append("catalog.count_range: нужен объект payload → число")
+    else:
+        for payload, value in ranges.items():
+            if not _payload_ok(payload) or payload not in payloads:
+                errors.append(f"catalog.count_range.{payload}: payload'а нет среди "
+                              "кнопок количества")
+            elif not _num(value) or value <= 0:
+                errors.append(f"catalog.count_range.{payload}: нужно "
+                              "положительное число")
+
+    checklist = _dig(cat, "checklist")
+    if not isinstance(checklist, list) or not checklist:
+        errors.append("catalog.checklist: пусто — финал без чек-листа")
+    else:
+        for i, step in enumerate(checklist):
+            spot = f"catalog.checklist[{i}]"
+            if not isinstance(step, dict):
+                errors.append(f"{spot}: ожидался объект")
+                continue
+            for field in ("emoji", "title", "short", "body", "when"):
+                if not str(step.get(field) or "").strip():
+                    errors.append(f"{spot}.{field}: пусто")
+    return errors
+
+
+def load(force=False):
+    """Эффективный контент: дефолты из кода + то, что лежит в content.json."""
+    if STATE["content"] is not None and not force:
+        return STATE["content"]
+    warnings = []
+    merged = copy.deepcopy(DEFAULTS)
+    raw = None
+    if os.path.exists(CONTENT_FILE):
+        try:
+            with open(CONTENT_FILE, encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except (ValueError, OSError) as exc:
+            warnings.append(f"content.json не разобран ({exc.__class__.__name__}: "
+                            f"{str(exc)[:120]}) — работаю на код-дефолтах")
+    else:
+        warnings.append("content.json нет — работаю на код-дефолтах")
+
+    if isinstance(raw, dict):
+        for group in ("meta", "texts", "buttons", "words", "catalog"):
+            if group in raw:
+                merged[group] = _merge(DEFAULTS[group], raw[group], group, warnings)
+        schema = raw.get("schema")
+        if schema != SCHEMA:
+            warnings.append(f"schema: в файле {schema!r}, код ждёт {SCHEMA!r} — "
+                            "сливаю как умею")
+        catalog_errors = _validate_catalog(merged["catalog"], [])
+        if catalog_errors:
+            merged["catalog"] = copy.deepcopy(DEFAULTS["catalog"])
+            warnings.append("catalog не прошёл валидацию ("
+                            + "; ".join(catalog_errors[:5])
+                            + ("" if len(catalog_errors) <= 5
+                               else f" и ещё {len(catalog_errors) - 5}")
+                            + ") — беру каталог из кода")
+    elif raw is not None:
+        warnings.append("content.json: ожидался объект — беру код-дефолты")
+
+    env_url = os.environ.get("MAX_CHANNEL_URL")
+    if env_url:
+        merged["meta"]["channel_url"] = env_url
+
+    STATE["content"] = merged
+    STATE["warnings"] = warnings
+    for line in warnings:
+        print("Контент:", line)
+    return merged
+
+
+def reload():
+    """Перечитать файл — для тестов и для дампера после правок на диске."""
+    STATE["content"] = None
+    return load(force=True)
+
+
+def warnings():
+    load()
+    return list(STATE["warnings"])
+
+
+def get(dotted, fallback=None):
+    """Значение по пути «texts.mode.body»; только после load()."""
+    value = _dig(load(), dotted)
+    return fallback if value is None else value
+
+
+def format_key(dotted, values=None, report=None):
+    """Подстановка с гарантией: не смог — берём код-дефолт, и снова не смог —
+    отдаём как есть, но молча не проглатываем.
+
+    Сообщения бота важнее идеальной грамматики шаблона: битый ключ не должен
+    стоить человеку шага.
+    """
+    values = values or {}
+    template = get(dotted)
+    if not isinstance(template, str):
+        return ""
+    try:
+        return template.format(**values)
+    except (KeyError, IndexError, ValueError) as exc:
+        default = _dig(DEFAULTS, dotted)
+        problem = getattr(exc, "args", ("",))
+        missing = problem[0] if problem and isinstance(problem[0], str) else "?"
+        if report is not None:
+            report.append(f"{dotted}: нет переменной {{{missing}}}")
+        if isinstance(default, str):
+            try:
+                out = default.format(**values)
+                if report is not None:
+                    report.append(f"{dotted}: беру код-дефолт")
+                return out
+            except (KeyError, IndexError, ValueError):
+                pass
+        return template
+
+
+def text(dotted, **values):
+    """Текст сообщения по ключу группы texts: «mode.body», «intro», «stale»."""
+    return format_key(f"texts.{dotted}", values)
+
+
+def label(dotted, **values):
+    """Подпись кнопки — тот же механизм, но из группы buttons."""
+    return format_key(f"buttons.{dotted}", values)
+
+
+def words(kind):
+    value = get(f"words.{kind}")
+    if isinstance(value, list) and len(value) == 3:
+        return tuple(value)
+    return tuple(DEFAULTS["words"].get(kind, ("", "", "")))
+
+
+def channel_url():
+    return str(get("meta.channel_url") or CHANNEL_URL_DEFAULT)
+
+
+def internal_fields():
+    """Пути полей-справочников, которые не выводятся в сообщениях.
+
+    Админка читает этот список и гасит такие поля с пояснением: правка доходит
+    до файла, но человек её не увидит — это не баг загрузки, а свойство поля.
+    """
+    value = get("meta.internal")
+    if not isinstance(value, list):
+        value = DEFAULTS["meta"]["internal"]
+    return [str(item) for item in value]
+
+
+def catalog(key):
+    return get(f"catalog.{key}")
+
+
+def spheres():
+    return catalog("spheres") or DEFAULTS["catalog"]["spheres"]
+
+
+def tools():
+    return catalog("tools") or DEFAULTS["catalog"]["tools"]
+
+
+def all_tools():
+    return list(tools()) + [catalog("fire_tool") or DEFAULTS["catalog"]["fire_tool"]]
+
+
+def self_role():
+    return catalog("self_role") or DEFAULTS["catalog"]["self_role"]
+
+
+def count_buttons():
+    return catalog("count_buttons") or DEFAULTS["catalog"]["count_buttons"]
+
+
+def count_range():
+    return {str(k): v for k, v in (catalog("count_range")
+                                   or DEFAULTS["catalog"]["count_range"]).items()}
+
+
+def checklist():
+    return catalog("checklist") or DEFAULTS["catalog"]["checklist"]
+
+
+def effective():
+    """Слитый контент целиком — это отдаётся админке и пишет дамп."""
+    return copy.deepcopy(load())
+
+
+def fill(template, values):
+    """Подстановка в произвольной строке — так рендерятся поля каталога.
+
+    У элемента каталога нет «запасного» текста в коде (сам каталог и есть
+    текст), поэтому при неизвестной переменной оставляем {имя} в выводе и
+    пишем в предупреждения: сообщение уходит, дефект виден в логе и на экране,
+    а не пропадает молча.
+    """
+    if not isinstance(template, str):
+        return ""
+    try:
+        return template.format(**values)
+    except (KeyError, IndexError, ValueError):
+        leftovers = [name for name in BRACE_RE.findall(template)
+                     if name not in values]
+        if leftovers:
+            STATE["warnings"].append(
+                "каталог: нет переменных " + ", ".join("{" + n + "}" for n in leftovers))
+        out = template
+        for name, value in values.items():
+            out = out.replace("{" + name + "}", str(value))
+        return out
+
+
+def catalog_vars(group):
+    """Переменные, которые код передаёт полям элемента каталога."""
+    return list(CATALOG_VARS.get(group) or [])
+
+
+def variables(dotted):
+    """Подстановки, которые код передаёт в этот ключ.
+
+    Список выводится из дефолтного шаблона, а не ведётся руками: контракт
+    «какие переменные доступны» обязан жить рядом с текстом, иначе он разъедется
+    в первый же день. Рендер-значения — в DEMO_VALUES, их берёт админка для
+    предпросмотра.
+    """
+    template = _dig(DEFAULTS, dotted)
+    if not isinstance(template, str):
+        return []
+    names = BRACE_RE.findall(template)
+    return sorted(set(names))
+
+
+def demo_values():
+    return dict(DEMO_VALUES)
+
+
+def problems():
+    """Все расхождения loaded-контента с контрактом кода — для CI и админки.
+
+    Во время работы бот на проблему только предупреждает (текст с чужой
+    переменной рендерится из код-дефолта, элемент каталога — с видимым {имя}),
+    но tools/check_content.py по этому же списку не пустит коммит в main:
+    дешевле поймать опечатку до деплоя, чем объяснять пользователю дырку в
+    сообщении.
+    """
+    found = []
+    for dotted in _template_paths(DEFAULTS["texts"]):
+        path = f"texts.{dotted}"
+        allowed = set(variables(path))
+        template = get(path)
+        for name in BRACE_RE.findall(template or ""):
+            if name not in allowed:
+                found.append(f"{path}: неизвестная переменная {{{name}}}")
+    for dotted in _template_paths(DEFAULTS["buttons"]):
+        path = f"buttons.{dotted}"
+        allowed = set(variables(path))
+        template = get(path)
+        for name in BRACE_RE.findall(template or ""):
+            if name not in allowed:
+                found.append(f"{path}: неизвестная переменная {{{name}}}")
+    allowed = set(catalog_vars("checklist"))
+    for i, step in enumerate(checklist()):
+        for field in ("title", "short", "body", "when", "emoji"):
+            value = (step or {}).get(field)
+            for name in BRACE_RE.findall(value if isinstance(value, str) else ""):
+                if name not in allowed:
+                    found.append(f"catalog.checklist[{i}].{field}: "
+                                 f"неизвестная переменная {{{name}}}")
+    for line in warnings():
+        if "валидацию" in line or "не разобран" in line or "не тот тип" in line:
+            found.append(line)
+    return found
+
+
+def _template_paths(node, prefix=""):
+    """Плоские пути («mode.body») по всем строковым шаблонам дерева."""
+    out = []
+    for key, value in node.items():
+        path = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, str):
+            out.append(path)
+        elif isinstance(value, dict):
+            out.extend(_template_paths(value, path))
+    return out
+
+
+def _leaf_paths(node, prefix=""):
+    out = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            path = f"{prefix}.{key}" if prefix else key
+            out.extend(_leaf_paths(value, path))
+    elif isinstance(node, list):
+        for i, value in enumerate(node):
+            out.extend(_leaf_paths(value, f"{prefix}[{i}]"))
+    elif prefix:
+        out.append(prefix)
+    return out
+
+
+def source_summary():
+    """Одна строка в лог цикла: откуда взялись тексты и что было не так.
+
+    По логу прод-цикла проверяется, дошла ли правка админки до бота — иначе
+    «поменял и ничего не произошло» разбирается только вслепую.
+    """
+    load()
+    if not os.path.exists(CONTENT_FILE):
+        return "код-дефолты (content.json нет)"
+    try:
+        with open(CONTENT_FILE, encoding="utf-8") as fh:
+            raw = json.load(fh)
+    except (ValueError, OSError):
+        return "content.json битый → код-дефолты"
+    if not isinstance(raw, dict):
+        return "content.json не объект → код-дефолты"
+    overridden = 0
+    for group in ("meta", "texts", "buttons", "words", "catalog"):
+        base = DEFAULTS.get(group)
+        node = raw.get(group)
+        if not isinstance(node, dict) or not isinstance(base, dict):
+            continue
+        for path in _leaf_paths(node):
+            if _dig(base, path) is not None:
+                overridden += 1
+    extra = f", предупреждений {len(STATE['warnings'])}" if STATE["warnings"] else ""
+    return f"content.json: задано {overridden} значений{extra}"
+
+
+def dump(path=None, indent=2):
+    """Записать эффективный контент в JSON — заготовка для tools/dump_content.py."""
+    target = path or CONTENT_FILE
+    with open(target, "w", encoding="utf-8") as fh:
+        json.dump(effective(), fh, ensure_ascii=False, indent=indent,
+                  sort_keys=False)
+        fh.write("\n")
+    return target

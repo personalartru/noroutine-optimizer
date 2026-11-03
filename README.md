@@ -163,14 +163,55 @@ dispatch повторяется до трёх попыток с проверко
 Важно: в workflow без шага `checkout` `gh` не выводит репозиторий из
 git-контекста — везде передаём `--repo personalartru/noroutine-optimizer` явно.
 
+## Админка контента
+
+Страница `admin/index.html` правит тексты, подписи кнопок и каталог (сферы,
+специальности, рутины, инструменты, чек-лист, ставки) без пуша руками: она
+пишет `content.json` коммитом в `main` через GitHub Contents API.
+
+Открыть: `https://personalartru.github.io/noroutine-optimizer/admin/`
+(нужен включённый Pages: Settings → Pages → Source = branch `main`, folder
+`/admin`).
+
+Что нужно один раз: personal access token с правом **Contents: Write** на этот
+репозиторий. Токен живёт только в `localStorage` браузера и уходит исключительно
+на `api.github.com`; в репозорий, в логи цикла и в код бота он не попадает ни
+при каких условиях. Без токена страница работает как читалка.
+
+Как правка доезжает до бота: коммит = push в `main` → `run-optimizer.yml`
+(в `push.paths` есть `content.json` и `content.py`) поднимает цикл → checkout
+свежего файла → `content.py` накладывает его поверх дефолтов. Обычно пара минут,
+предельный срок — длина одного круга, 10 минут. Откат — revert коммита на
+GitHub: бот так же подхватит прежнее содержимое.
+
+Что остаётся в коде и админкой не правится: порядок шагов диалога, виды
+`payload`'ов (`opt:s:it` …), вся арифметика расчёта, лимиты MAX. Страница
+сверяет правку с машинным справочником `content.schema.json` — пределы,
+допустимые подстановки и демо-значения для предпросмотра генерируются из кода
+(`python3 tools/dump_content.py`), а не ведутся руками.
+
+Модель отказа: битый JSON, неизвестный ключ или чужая переменная не роняют бота
+— `content.py` берёт вариант из кода и пишет `::warning::контент:` в лог цикла.
+Страница старается не допустить этого сама: не даёт сохранять при ошибках,
+показывает «пропала подстановка» как замечание и помечает поля из
+`meta.internal` (например `catalog.spheres[].blurb`, `catalog.self_role.label`)
+как «не видно в чате» — код их читает как справочник, читатель не увидит.
+
 ## Проверки перед push
 
 ```bash
+python3 tools/dump_content.py --check          # content.json и content.schema.json не отстали от кода
+python3 tools/check_content.py                 # 61 проверка оверлея: подстановки, служебные поля, мёртвые ключи
 python3 tools/simulate_optimizer.py --quiet    # 6 сценариев + инварианты клавиатур, optimizer-preview.html
-python3 tools/check_max_bot.py                 # 57 интеграционных проверок с заглушкой MAX API
+python3 tools/simulate_optimizer.py --overlay --quiet --no-preview   # правка из админки видна, цифры и payload'ы — нет
+python3 tools/check_max_bot.py                 # 67 интеграционных проверок с заглушкой MAX API
 python3 tools/fuzz_optimizer.py --runs 800     # случайные payload'ы и тексты + обход всех сфер
 python3 tools/make_report_pdf.py               # отчёты реальны: собирает PDF по тем же сценариям
 ```
+
+`.github/workflows/checks.yml` прогоняет первые шесть на каждый push в `main`
+и на pull request — коммит админки не уйдёт в прод, если правка ломает
+подстановку или структуру каталога.
 
 `check_max_bot.py` заглушает и `requests.post`, поэтому загрузку файла в MAX
 (двухшаговый upload, вложение `file`, повторный клик без второй загрузки и

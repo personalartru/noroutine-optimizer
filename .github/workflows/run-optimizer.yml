@@ -3,6 +3,10 @@ name: Run optimizer bot (GitHub Actions)
 # Один цикл = ~9 минут long polling, затем шаг переочереди ставит следующий
 # прогон. Push в main по коду бота тоже запускает цикл — свежий код попадает в
 # прод сам, отдельный деплой не нужен.
+#
+# content.json в списке путей не случайно: админка правит текст именно им и
+# коммитит в main. Push от админки поднимает цикл сразу, не дожидаясь конца
+# цепочки, — правка видна в чате через минуту-две.
 
 on:
   workflow_dispatch:
@@ -18,6 +22,8 @@ on:
       - "optimizer.py"
       - "max_bot.py"
       - "report_pdf.py"
+      - "content.py"
+      - "content.json"
       - "requirements.txt"
       - ".github/workflows/run-optimizer.yml"
 
