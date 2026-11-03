@@ -392,7 +392,7 @@ def main():
     who = bot_username()
     print(f"аккаунт: @{who or 'не опознан — проверьте MAX_BOT_TOKEN'} · "
           f"заявки: чат {ADMIN_CHAT_ID or 'не задан (только лог)'} · "
-          f"ссылка на лид-бота: {optimizer.LEAD_BOT_URL}")
+          f"кнопка на финале: {optimizer.CHANNEL_URL}")
 
     while time.time() < deadline:
         try:

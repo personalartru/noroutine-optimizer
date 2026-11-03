@@ -27,9 +27,10 @@ import os
 import re
 import time
 
-# Финальный шаг отправляет не только заявку: ссылка на лид-бота канала,
-# где берут готовые воркфлоу. Замечена в MAX по имени @se14730534_bot.
-LEAD_BOT_URL = os.environ.get("LEAD_BOT_URL", "https://max.ru/se14730534_bot")
+# Финальный шаг, кроме заявки, ведёт читателя в канал про автоматизацию —
+# там выходят разборы и готовые связки. Ссылку можно переназначить переменной
+# окружения MAX_CHANNEL_URL, не трогая код.
+CHANNEL_URL = os.environ.get("MAX_CHANNEL_URL", "https://max.ru/channel_noroutine")
 
 SESSION_TTL = 40 * 60          # без действий сессия сбрасывается
 MAX_HEADCOUNT = 300            # потолок для ручного ввода
@@ -1040,8 +1041,8 @@ def dispatch_text(text, session):
         messages = emit(
             TEXT_FEEDBACK_DONE + summary,
             [[btn("🔧 Оптимизатор заново", "opt:again")],
-             [{"type": "link", "text": "Хочу готовое под свой процесс",
-               "url": LEAD_BOT_URL}]])
+             [{"type": "link", "text": "Канал про автоматизацию",
+               "url": CHANNEL_URL}]])
         # «admin» — сигнал транспорту переслать этот текст владельцу
         messages[-1]["admin"] = text
         return {**session, "step": "done"}, messages

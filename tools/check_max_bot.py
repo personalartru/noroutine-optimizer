@@ -125,7 +125,7 @@ results.append(check("есть бюджет и дисклеймер",
 results.append(check("в финале кнопка заявки",
                      any(b.get("payload") == "opt:fb" for b in all_buttons())))
 
-# 3. Финальная клавиатура ссылки на лид-бота: callback чужого бота недопустим
+# 3. Финальная клавиатура ведёт в канал: callback чужого бота недопустим
 reset()
 for payload in FLOW + ["opt:fb"]:
     click(payload)
@@ -137,9 +137,15 @@ flat = [b for m in msgs for row in buttons_of(m) for b in row]
 results.append(check("есть «Оптимизатор заново» (callback)",
                      any(b.get("payload") == "opt:again" for b in flat)))
 links = [b for b in flat if b.get("type") == "link"]
-results.append(check("ссылка на старого бота — тип link с url",
-                     links and all(b.get("url", "").startswith("https://max.ru/") for b in links),
+results.append(check("на финале одна ссылка — «Канал про автоматизацию»",
+                     len(links) == 1 and links[0].get("text") == "Канал про автоматизацию",
+                     str([b.get("text") for b in links])))
+results.append(check("ссылка ведёт на канал noroutine",
+                     links and links[0].get("url") == "https://max.ru/channel_noroutine",
                      str([b.get("url") for b in links])))
+results.append(check("ссылки на старого лид-бота в текстах не осталось",
+                     not any("se14730534_bot" in t for t in texts_to())
+                     and not any("se14730534_bot" in (b.get("url") or "") for b in flat)))
 results.append(check("в новом боте нет чужих callback-payload'ов",
                      not any(b.get("payload") == "want_task" for b in flat)))
 

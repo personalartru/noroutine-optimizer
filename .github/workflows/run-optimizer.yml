@@ -89,7 +89,7 @@ jobs:
           # Ваш user_id в MAX: сюда приходят заявки с финального шага. Вы должны
           # один раз запустить бота — MAX-бот пишет только запустившим его.
           MAX_ADMIN_CHAT_ID: ${{ secrets.MAX_ADMIN_CHAT_ID || '60669315' }}
-          LEAD_BOT_URL: ${{ vars.LEAD_BOT_URL || 'https://max.ru/se14730534_bot' }}
+          MAX_CHANNEL_URL: ${{ vars.MAX_CHANNEL_URL || 'https://max.ru/channel_noroutine' }}
           BOT_RUN_MINUTES: ${{ inputs.minutes || '9' }}
           REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
         run: python max_bot.py --minutes "${{ inputs.minutes || '9' }}"
