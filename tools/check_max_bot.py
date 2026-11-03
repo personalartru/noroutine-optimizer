@@ -94,6 +94,41 @@ def check(label, condition, detail=""):
     return bool(condition)
 
 
+# Заглушка загрузки файлов: `upload_file` ходит в MAX прямым `requests.post`,
+# минуя `call`. Ставим её до первого же клика — иначе секции, которые шлют
+# заявку с PDF, ушли бы в сеть настоящим тестовым токеном.
+UP = []
+
+
+class Resp:
+    def __init__(self, payload, code=200):
+        self._payload = payload
+        self.status_code = code
+        self.text = json.dumps(payload)
+
+    def json(self):
+        return self._payload
+
+
+def fake_post(url, params=None, headers=None, files=None, timeout=None, **_kw):
+    UP.append({"url": url, "params": params, "auth": (headers or {}).get("Authorization"),
+               "name": (files or {}).get("data", ("",))[0]})
+    if url.endswith("/uploads"):
+        return Resp({"url": "https://upload.example/put/42"})
+    return Resp({"token": "file-token-42"})
+
+
+class FakeRequests:
+    RequestException = RuntimeError
+
+    @staticmethod
+    def post(url, **kwargs):
+        return fake_post(url, **kwargs)
+
+
+real_requests = max_bot.requests
+max_bot.requests = FakeRequests
+
 results = []
 
 # 1. «bot_started»: бот сам открывает шаг 1, лишних тапов нет
@@ -161,7 +196,11 @@ if admin:
                          and "[Оптимизатор]" in body
                          and "IT / продукт" in body
                          and f"max.ru/u/{USER}" in body))
-results.append(check("сессия очищена после заявки", session_of() is None))
+results.append(check("после заявки шаг закрыт, но расчёт жив для кнопки PDF",
+                     (session_of() or {}).get("step") == "done"
+                     and bool((session_of() or {}).get("calc"))
+                     and bool((session_of() or {}).get("sav")),
+                     str((session_of() or {}).get("step"))))
 
 # 5. Регресс на прод-сбой: на шаге количества кнопки обязаны быть с type
 reset()
@@ -362,6 +401,118 @@ for path in STATE_FILES:
 max_bot.bootstrap_state()
 results.append(check("после bootstrap_state все файлы состояния существуют",
                      all(os.path.exists(p) for p in STATE_FILES)))
+
+# 12d. PDF: в чате короткий чек-лист, подробный — файлом, а если файла нет — текстом
+# холодный кэш диалогов: личку пишем параметром user_id, а не chat_id=<user_id>
+# (в MAX chat_id=60669315 = 404 chat.not.found, а user_id=60669315 доставляет)
+reset()
+click("opt:start")
+cold = [s for s in SENT if s["path"] == "messages"]
+results.append(check("при пустом кэше диалогов шаг уходит параметром user_id",
+                     bool(cold) and all(s["query"] == {"user_id": USER} for s in cold),
+                     str([s["query"] for s in cold][:2])))
+max_bot.remember_dialog(USER, DIALOG)
+max_bot.remember_dialog(USER2, DIALOG2)
+
+short_chat = optimizer.text_checklist({"ops": []}, {"tools": []})
+results.append(check("чек-лист в чате — одна строка на шаг и влезает в лимит",
+                     len(short_chat) <= optimizer.TEXT_CHUNK
+                     and short_chat.count("\n") >= 7
+                     and any(ch in short_chat for ch in "🎯📝🔑📏📈")))
+results.append(check("полная версия остаётся где взять",
+                     "Чек-лист внедрения — подробно" in
+                     optimizer.checklist_full_text({"ops": []}, {"tools": []})))
+
+# заглушка на `requests` стоит в начале файла: загрузка файла в MAX не должна
+# уходить в сеть даже в секциях, которым PDF не нужен (иначе проверка «без сети»
+# начнёт дёргать platform-api2.max.ru тестовым токеном).
+if not max_bot.report_pdf.available():
+    print("::warning::нет fpdf2 или кириллического шрифта — `pip install "
+          "-r requirements.txt`, иначе проверки PDF ниже падают справедливо")
+
+# до этого шага сессия уже прошла полный путь, но её перезапускают другие
+# проверки — проигрываем клик-путь заново, чтобы calc и sav точно были
+max_bot.UPLOADS.clear()   # кэш загрузки тёплый от заявки выше — обнуляем счётчики
+del UP[:]
+reset()
+for payload in FLOW:
+    click(payload)
+
+reset()
+click("opt:p:report")
+file_msgs = [m for m in SENT if m["path"] == "messages"
+             and any(a.get("type") == "file" for a in m["body"].get("attachments", []))]
+results.append(check("по кнопке файл загружается в MAX (uploads → multipart)",
+                     len(UP) == 2 and UP[0]["url"].endswith("/uploads")
+                     and UP[1]["url"] == "https://upload.example/put/42",
+                     f"{len(UP)} загрузок"))
+results.append(check("PDF уходит сообщением с attachment type=file",
+                     len(file_msgs) == 1
+                     and file_msgs[0]["body"]["attachments"][0]["payload"]["token"]
+                     == "file-token-42"
+                     and file_msgs[0]["query"].get("chat_id") == DIALOG,
+                     f"{len(file_msgs)} файл-сообщ., "
+                     + str([m["query"] for m in file_msgs])))
+results.append(check("кнопки остались под файлом",
+                     any(a.get("type") == "inline_keyboard"
+                         for a in file_msgs[0]["body"].get("attachments", []))
+                     if file_msgs else False))
+results.append(check("имя файла читаемое",
+                     UP[1]["name"].startswith("optimizator-")
+                     and UP[1]["name"].endswith(".pdf")))
+
+# второй клик того же отчёта не должен дважды грузить один и тот же файл
+reset()
+click("opt:p:report")
+results.append(check("повтор той же кнопки не перезагружает файл", len(UP) == 2))
+
+# кнопка «Полный отчёт (PDF)» живёт и под закрытой заявкой: регресс на «сессия
+# очищена» — клик давал «сначала пройдём шаги» вместо файла
+del UP[:]
+reset()
+for payload in FLOW + ["opt:fb"]:
+    click(payload)
+max_bot.handle_text(USER, DIALOG, "Павел", "personartru",
+                    "Хочу автоматизировать тикеты, 8 человек")
+results.append(check("после заявки обычный текст не становится второй заявкой",
+                     not max_bot.optimizer.expects_text(max_bot.session_for(USER) or {})))
+reset()
+click("opt:p:report")
+after_lead = [m for m in SENT if m["path"] == "messages"
+              and any(a.get("type") == "file"
+                      for a in m["body"].get("attachments", []))]
+results.append(check("PDF отдаётся и после отправленной заявки",
+                     len(after_lead) == 1
+                     and after_lead[0]["query"].get("chat_id") == DIALOG,
+                     str([(m["query"], [a["type"] for a in m["body"].get("attachments", [])])
+                         for m in after_lead])))
+
+# если шрифта/библиотеки нет — человек получает текст, а не тишину
+real_available = max_bot.report_pdf.available
+max_bot.report_pdf.available = lambda: False
+reset()
+click("opt:p:report")
+texts = texts_to()
+results.append(check("без PDF-библиотеки чек-лист уезжает текстом",
+                     any("Чек-лист внедрения — подробно" in t for t in texts)))
+max_bot.report_pdf.available = real_available
+
+# заявка владельцу приезжает с тем же PDF, загруженным его токеном
+saved_lead = (max_bot.LEAD_BOT_TOKEN, max_bot.LEAD_ADMIN_USER_ID)
+max_bot.LEAD_BOT_TOKEN, max_bot.LEAD_ADMIN_USER_ID = "lead-token", "999"
+del UP[:]
+reset()
+max_bot.notify_admin(USER, "Павел", "Хочу автоматизировать тикеты", "personartru",
+                     session_of() or {})
+lead_msgs = [m for m in SENT if m["path"] == "messages"
+             and m["token"] == "lead-token"]
+results.append(check("к заявке для владельца приложен PDF",
+                     len(lead_msgs) == 1
+                     and any(a.get("type") == "file"
+                             for a in lead_msgs[0]["body"].get("attachments", []))
+                     and any(u["auth"] == "lead-token" for u in UP)))
+max_bot.LEAD_BOT_TOKEN, max_bot.LEAD_ADMIN_USER_ID = saved_lead
+max_bot.requests = real_requests
 
 # 13. Запуск без токена честно говорит о проблеме, а не крутит пустой цикл
 saved, max_bot.TOKEN = max_bot.TOKEN, ""

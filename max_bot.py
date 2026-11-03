@@ -17,14 +17,17 @@
 
 Запуск: python max_bot.py [--minutes N]
 """
+import hashlib
 import json
 import os
+import re
 import sys
 import time
 
 import requests
 
 import optimizer
+import report_pdf
 
 MAX_API = os.environ.get("MAX_API_BASE", "https://platform-api2.max.ru")
 # Пустой токен — не исключение, а штатная ситуация «секрет ещё не добавлен»:
@@ -104,16 +107,28 @@ def forget_dialog(user_id):
         print(f"Забыл устаревший диалог: user_id={user_id}")
 
 
-def send_direct(user_id, text, buttons=None, chat_id=None):
-    """Личное сообщение. chat_id диалога важнее user_id — иначе 404."""
+def send_direct(user_id, text, buttons=None, chat_id=None, file_token=None):
+    """Личное сообщение: chat_id диалога, если он известен, иначе user_id.
+
+    MAX принимает либо `chat_id`, либо `user_id` — и отдаёт 404 chat.not.found,
+    если подставить user_id в chat_id. Поэтому при пустом кэше диалогов пишем
+    именно параметром `user_id`, а не угадываем чат.
+    """
+    query = {"chat_id": chat_id} if chat_id else {"user_id": user_id}
     target = chat_id or user_id
     body = {"text": text, "format": "html", "notify": True}
+    attachments = []
+    if file_token:
+        attachments.append({"type": "file", "payload": {"token": file_token}})
     if buttons:
-        body["attachments"] = [{"type": "inline_keyboard",
-                                "payload": {"buttons": buttons}}]
+        attachments.append({"type": "inline_keyboard",
+                            "payload": {"buttons": buttons}})
+    if attachments:
+        body["attachments"] = attachments
     try:
-        call("POST", "messages", query={"chat_id": target}, body=body)
-        print("Отправлено в личку:", target)
+        call("POST", "messages", query=query, body=body)
+        print("Отправлено в личку:", target,
+              "(chat_id)" if chat_id else "(user_id)")
         return True
     except RuntimeError as e:
         print(f"Личка недоступна ({target}):", e)
@@ -133,6 +148,69 @@ def answer_callback(callback_id, text):
     except RuntimeError as e:
         print("Не удалось ответить на callback:", e)
         return False
+
+
+# ── Файлы в MAX ──────────────────────────────────────────────────────────────
+UPLOADS = {}
+
+
+def upload_file(data, filename="report.pdf", mime="application/pdf", token=None):
+    """Двухшаговая загрузка файла, как в лид-боте: /uploads -> multipart.
+
+    1) POST /uploads?type=file -> {"url": "..."} (или сразу token)
+    2) POST файла на этот url (поле data) -> {"token": "..."}
+    Токен файла привязан к загрузившему боту, поэтому кэш по (хэш, токен).
+    """
+    key = (hashlib.sha1(data).hexdigest(), token or TOKEN, filename)
+    if key in UPLOADS:
+        return UPLOADS[key]
+    headers = {"Authorization": token or TOKEN}
+    r = requests.post(f"{MAX_API}/uploads", params={"type": "file"},
+                      headers=headers, timeout=60)
+    if r.status_code != 200:
+        raise RuntimeError(f"uploads: HTTP {r.status_code} {r.text[:200]}")
+    payload = r.json()
+    file_token = payload.get("token") or (payload.get("result") or {}).get("token")
+    if not file_token:
+        upload_url = payload.get("url")
+        if not upload_url:
+            raise RuntimeError(f"MAX не вернул url для загрузки: {str(payload)[:200]}")
+        r2 = requests.post(upload_url, headers=headers,
+                           files={"data": (filename, data, mime)}, timeout=180)
+        if r2.status_code != 200:
+            raise RuntimeError(f"upload url: HTTP {r2.status_code} {r2.text[:200]}")
+        got = r2.json()
+        file_token = (got.get("token") or (got.get("result") or {}).get("token")
+                      or payload.get("token"))
+    if not file_token:
+        raise RuntimeError("MAX не вернул токен файла")
+    UPLOADS[key] = file_token
+    print(f"Файл загружен в MAX: {filename} ({len(data)} байт)")
+    return file_token
+
+
+def report_bytes(data):
+    """PDF отчёта или None: без fpdf2/шрифта бот честно отдаст текст."""
+    if not report_pdf.available():
+        print("::warning::PDF недоступен (нет fpdf2 или кириллического шрифта) — "
+              "отправлю чек-лист текстом")
+        return None
+    try:
+        return report_pdf.build(data)
+    except Exception as e:                       # не роняем шаг из-за вёрстки
+        print(f"::warning::не удалось собрать PDF: {e} — отправлю текстом")
+        return None
+
+
+def report_filename(data):
+    """Имя файла по-человечески: optimizator-it-03-11-2026.pdf (id сферы, не кириллица)."""
+    base = re.sub(r"[^a-z0-9]+", "-", str(data.get("slug") or "").lower()).strip("-")
+    if not base:
+        base = re.sub(r"[^a-z0-9]+", "-",
+                      str(data.get("title", "")).lower()).strip("-")
+    base = re.sub(r"-{2,}", "-", base)[:40] or "optimizator"
+    date = re.sub(r"[^0-9]", "-", str(data.get("date", ""))).strip("-")
+    return f"optimizator-{base}-{date}.pdf"
 
 
 def admin_routes():
@@ -178,7 +256,7 @@ def queue_admin_lead(text):
           f"(в очереди: {len(pending['leads'])})")
 
 
-def send_admin_lead(text):
+def send_admin_lead(text, pdf=None, filename="report.pdf"):
     routes = admin_routes()
     if not routes:
         print("::warning::некуда слать заявку: нет LEAD_MAX_BOT_TOKEN "
@@ -186,11 +264,21 @@ def send_admin_lead(text):
         queue_admin_lead(text)
         return False
     for token, query, label in routes:
+        file_token = ""
+        if pdf:
+            try:
+                file_token = upload_file(pdf, filename=filename, token=token)
+            except (RuntimeError, requests.RequestException) as e:
+                # заявка важнее приложения: уезжаем без файла
+                print(f"::warning::PDF к заявке не загрузился ({label}): {e}")
+        body = {"text": text, "format": "html", "notify": True}
+        if file_token:
+            body["attachments"] = [{"type": "file",
+                                    "payload": {"token": file_token}}]
         try:
-            call("POST", "messages", query=query,
-                 body={"text": text, "format": "html", "notify": True},
-                 token=token)
-            print(f"Заявка отправлена владельцу -> {label}")
+            call("POST", "messages", query=query, body=body, token=token)
+            print(f"Заявка отправлена владельцу -> {label}"
+                  + (" с PDF" if file_token else ""))
             return True
         except RuntimeError as e:
             print(f"Заявка не прошла через {label}: {e}")
@@ -245,7 +333,20 @@ def notify_admin(user_id, name, request, username, session):
             summary += f" · инструменты: {tools}"
         lines += ["", f"[Оптимизатор] {summary}"]
     lines += ["", "Ответьте ему в личку MAX: откройте профиль и напишите."]
-    return send_admin_lead("\n".join(lines))
+
+    # Второй экземпляр отчёта — владельцу: видно, что именно получил человек.
+    pdf, filename = None, "report.pdf"
+    if calc and session.get("sav"):
+        try:
+            data = optimizer.report_data(session, calc, session["sav"])
+            pdf = report_bytes(data)
+            filename = report_filename(data)
+            if pdf:
+                lines.insert(-1, "Полный расчёт и чек-лист — в PDF ниже.")
+        except Exception as e:
+            print(f"::warning::PDF к заявке не собрался: {e}")
+            pdf = None
+    return send_admin_lead("\n".join(lines), pdf=pdf, filename=filename)
 
 
 # ── Состояние ────────────────────────────────────────────────────────────────
@@ -314,13 +415,34 @@ def session_for(user_id):
 
 
 def store_session(user_id, session):
-    """Держим только живой шаг: финал и отмена очищают файл."""
+    """Живой шаг держим, отменённый выбрасываем, готовый расчёт — отдельно.
+
+    Финал (`step == "done"`) раньше очищал запись целиком, и кнопка
+    «📄 Полный отчёт (PDF)» под сообщением с заявкой попадала в пустую сессию:
+    человек жал её, а бот отвечал «сначала пройдём шаги». Теперь от финала
+    оставляем только расчёт (`calc`/`sav`) — он больше ни на что не влияет:
+    `expects_text` на "done" ложь, поэтому обычные сообщения не становятся
+    заявками, а «Пройти заново» начинает чистую сессию как и раньше.
+    """
     sessions = load_sessions()
     key = str(user_id)
-    if not session or session.get("step") == "done":
+    step = (session or {}).get("step")
+    if not session:
         sessions.pop(key, None)
+    elif step == "done" and not (session.get("calc") and session.get("sav")):
+        sessions.pop(key, None)
+    elif step == "done":
+        sessions[key] = {"step": "done", "calc": session["calc"],
+                         "sav": session["sav"], "sphere": session.get("sphere"),
+                         "roles": session.get("roles"), "ops": session.get("ops"),
+                         "tools": session.get("tools"),
+                         "updated": session.get("updated", time.time())}
     else:
         sessions[key] = session
+    # заодно чистим протухшие: файл состояния живёт в actions/cache и не должен
+    # разрастаться записями всех, кто когда-то нажал кнопку
+    for stale in [k for k, v in sessions.items() if optimizer.is_expired(v)]:
+        sessions.pop(stale, None)
     save_sessions(sessions)
 
 
@@ -362,6 +484,41 @@ def bootstrap_state():
 
 
 # ── Оптимизатор ──────────────────────────────────────────────────────────────
+def deliver_pdf(user_id, chat_id, message):
+    """Отдать PDF по кнопке: файл с подписью, а если файла нет — текст-выручалочка.
+
+    Отчёт может не собраться (в окружении нет fpdf2 или кириллического шрифта)
+    или не загрузиться (MAX не ответил токеном). В обоих случаях человек обязан
+    получить содержимое: `pdf_fallback` — развёрнутый чек-лист сообщением.
+    """
+    data = message.get("pdf") or {}
+    fallback = message.get("pdf_fallback") or ""
+    buttons = message.get("buttons")
+    blob = report_bytes(data)
+    if blob is None:
+        return send_text_checklist(user_id, chat_id, fallback, buttons)
+    try:
+        file_token = upload_file(blob, filename=report_filename(data))
+    except (RuntimeError, requests.RequestException) as e:
+        print(f"::warning::файл не загрузился в MAX: {e} — отправлю текстом")
+        return send_text_checklist(user_id, chat_id, fallback, buttons)
+    return send_direct(user_id, message.get("text", ""), buttons=buttons,
+                       chat_id=chat_id, file_token=file_token)
+
+
+def send_text_checklist(user_id, chat_id, text, buttons=None):
+    """Развёрнутый чек-лист текстом: режем по 900 символов, кнопки — на последнем."""
+    if not text:
+        return False
+    parts = optimizer.chunk(text)
+    ok = False
+    for i, part in enumerate(parts):
+        ok = send_direct(user_id, part,
+                         buttons=buttons if i == len(parts) - 1 else None,
+                         chat_id=chat_id) or ok
+    return ok
+
+
 def deliver_messages(user_id, chat_id, messages, callback_id=None):
     """Шаги — отдельными сообщениями, как их собрал optimizer.py.
 
@@ -373,8 +530,12 @@ def deliver_messages(user_id, chat_id, messages, callback_id=None):
         text = (message or {}).get("text")
         if not text:
             continue
-        if chat_id and send_direct(user_id, text, buttons=message.get("buttons"),
-                                   chat_id=chat_id):
+        if message.get("pdf"):
+            if deliver_pdf(user_id, chat_id, message):
+                delivered = True
+                continue
+        if send_direct(user_id, text, buttons=message.get("buttons"),
+                       chat_id=chat_id):
             delivered = True
             continue
         if not delivered and index == 0:
@@ -411,7 +572,7 @@ def handle_callback(callback):
     callback_id = callback.get("callback_id")
     user = callback.get("user") or {}
     user_id = user.get("user_id")
-    chat_id = dialog_for(user_id) or user_id
+    chat_id = dialog_for(user_id)
 
     if not payload.startswith("opt:"):
         # Кнопка из старого диалога (бот до переезда) — не теряем клик.
@@ -447,9 +608,9 @@ def handle_bot_started(event):
     """Пользователь открыл бота: сразу ведём в шаг 1, лишних тапов нет."""
     user = event.get("user") or {}
     user_id = user.get("user_id")
-    chat_id = event.get("chat_id") or dialog_for(user_id) or user_id
+    chat_id = event.get("chat_id") or dialog_for(user_id)
     remember_dialog(user_id, chat_id)
-    print("bot_started | user", user_id, "| chat", chat_id,
+    print("bot_started | user", user_id, "| chat", chat_id or "нет (пишу user_id)",
           "| payload", event.get("payload"))
     handle_optimizer(user_id, chat_id, payload="opt:start",
                      name=user.get("name") or user.get("first_name") or "",
@@ -508,8 +669,14 @@ def main():
     # и иначе цикл крутил бы 9 минут впустую.
     who = bot_username()
     routes = admin_routes()
+    if report_pdf.available():
+        font = os.path.basename(report_pdf.font_regular())
+        pdf_state = f"собираю ({font})"
+    else:
+        pdf_state = "нет — чек-лист отдам текстом"
     print(f"аккаунт: @{who or 'не опознан — проверьте MAX_BOT_TOKEN'} · "
           f"заявки: {routes[0][2] if routes else 'некуда слать (только очередь)'} · "
+          f"PDF: {pdf_state} · "
           f"кнопка на финале: {optimizer.CHANNEL_URL}")
     flush_admin_leads()
     bootstrap_state()

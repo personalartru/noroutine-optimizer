@@ -540,7 +540,8 @@ def keyboard_tools_marked(session):
 
 
 def keyboard_final():
-    return [[btn("💬 Отправить заявку", "opt:fb")],
+    return [[btn("📄 Полный отчёт (PDF)", "opt:p:report")],
+            [btn("💬 Отправить заявку", "opt:fb")],
             [btn("Пройти заново", "opt:again")]]
 
 
@@ -684,42 +685,151 @@ def text_savings(session, calc, sav):
     ]
 
 
-def text_checklist(calc, sav):
-    ops = sorted(calc["ops"], key=lambda o: -o["hours"])
+def checklist_steps(calc, sav):
+    """Семь шагов внедрения — один источник для чата, PDF и текстового fallback.
+
+    `short` — одна строка в чате (с эмодзи и сроком), `body` — пояснение, которое
+    едет только в PDF: в сообщении оно раздувает финальный экран до трёх
+    простыней.
+    """
+    ops = sorted(calc.get("ops") or [], key=lambda o: -o["hours"])
     first = ops[0]["label"] if ops else "повторяющаяся операция"
     first_hours = ops[0]["hours"] if ops else 0
     second = ops[1]["label"] if len(ops) > 1 else "соседние операции"
-    pilot = sav["tools"][0]["pilot"] if sav["tools"] else "переводим шаг в сценарий"
-    tool_names = ", ".join(t["label"].lower() for t in sav["tools"]) or "связки"
-    steps = [
-        ("Зафиксировать процесс как есть",
-         f"Опишите «{esc(first)}» по шагам: кто начинает, где живут данные, что "
-         "значит «готово».", "0,5 дня"),
-        ("Выбрать один пилот",
-         f"Берём самое дорогое — «{esc(first)}» ({first_hours} ч/мес на человека): "
-         f"{esc(pilot)}. Остальное после первого результата.", "1 неделя"),
-        ("Подготовить данные и доступы",
-         "Регламенты, таблицы-источники, API-ключи и права, ответственный за "
-         "исключения.", "2–3 дня"),
-        ("Собрать MVP и гонять рядом с руками",
-         f"Первая версия ({esc(tool_names)}) работает вместе с человеком: автомат "
-         "делает, человек правит правила — так находятся крайние случаи.",
-         "1–2 недели"),
-        ("Замерить часы до и после",
-         "Сколько уходило и сколько осталось. Только замер отличает «кажется, "
-         "быстрее» от реальной экономии.", "2 недели"),
-        ("Передать владельцу и задокументировать",
-         "Кто правит сценарии, куда писать при сбое, как добавить операцию.",
-         "1 день"),
-        ("Тиражировать",
-         f"По «{esc(first)}» есть цифра — добавляем «{esc(second)}» и остальное из "
-         "расчёта: они встают на готовый контур дешевле.", "1–2 недели на операцию"),
+    pilot = sav["tools"][0]["pilot"] if sav.get("tools") else "переводим шаг в сценарий"
+    tool_names = ", ".join(t["label"].lower() for t in sav.get("tools", [])) or "связки"
+    return [
+        {
+            "emoji": "📝",
+            "title": "Зафиксировать процесс как есть",
+            "short": "Зафиксировать процесс",
+            "body": f"Опишите «{esc(first)}» по шагам: кто начинает, где живут "
+                    "данные, что значит «готово».",
+            "when": "0,5 дня",
+        },
+        {
+            "emoji": "🎯",
+            "title": "Выбрать один пилот",
+            "short": f"Пилот: «{first}» ({first_hours} ч/мес)",
+            "body": f"Берём самое дорогое — «{esc(first)}» ({first_hours} ч/мес на "
+                    f"человека): {esc(pilot)}. Остальное после первого результата.",
+            "when": "1 неделя",
+        },
+        {
+            "emoji": "🔑",
+            "title": "Подготовить данные и доступы",
+            "short": "Данные, доступы, права",
+            "body": "Регламенты, таблицы-источники, API-ключи и права, ответственный "
+                    "за исключения.",
+            "when": "2–3 дня",
+        },
+        {
+            "emoji": "🛠",
+            "title": "Собрать MVP и гонять рядом с руками",
+            "short": "MVP рядом с руками",
+            "body": f"Первая версия ({esc(tool_names)}) работает вместе с человеком: "
+                    "автомат делает, человек правит правила — так находятся крайние "
+                    "случаи.",
+            "when": "1–2 недели",
+        },
+        {
+            "emoji": "📏",
+            "title": "Замерить часы до и после",
+            "short": "Замер до и после",
+            "body": "Сколько уходило и сколько осталось. Только замер отличает "
+                    "«кажется, быстрее» от реальной экономии.",
+            "when": "2 недели",
+        },
+        {
+            "emoji": "🧭",
+            "title": "Передать владельцу и задокументировать",
+            "short": "Ответственный и инструкция",
+            "body": "Кто правит сценарии, куда писать при сбое, как добавить операцию.",
+            "when": "1 день",
+        },
+        {
+            "emoji": "📈",
+            "title": "Тиражировать",
+            "short": f"Тираж: «{second}» и остальное",
+            "body": f"По «{esc(first)}» есть цифра — добавляем «{esc(second)}» и "
+                    "остальное из расчёта: они встают на готовый контур дешевле.",
+            "when": "1–2 недели на операцию",
+        },
     ]
+
+
+def text_checklist(calc, sav):
+    """Чек-лист в чате: одна строка на шаг, подробности — в PDF."""
+    steps = checklist_steps(calc, sav)
     lines = ["<b>Чек-лист внедрения</b>", ""]
-    for i, (title, body, when) in enumerate(steps, start=1):
-        lines.append(f"<b>{i}. {title}</b> — {body}"
-                     f"\n   <i>{when}</i>\n")
+    for i, step in enumerate(steps, start=1):
+        lines.append(f"{i}. {step['emoji']} {step['short']} — <i>{step['when']}</i>")
+    lines.append("")
+    lines.append("Пояснения к каждому шагу, расчёт и бюджет — кнопкой «📄 Полный "
+                 "отчёт (PDF)» ниже.")
     return "\n".join(lines).rstrip()
+
+
+def checklist_full_text(calc, sav):
+    """Развёрнутый чек-лист сообщением: запасной путь, если PDF не собрался."""
+    lines = ["<b>Чек-лист внедрения — подробно</b>", ""]
+    for i, step in enumerate(checklist_steps(calc, sav), start=1):
+        lines.append(f"<b>{i}. {step['title']}</b> — {step['body']}"
+                     f"\n   <i>{step['when']}</i>\n")
+    return "\n".join(lines).rstrip()
+
+
+def strip_html(text):
+    """Текст для PDF: разметка MAX в отчёте не нужна."""
+    plain = re.sub(r"</?(?:b|i|u|s|a|br)[^>]*>", "", str(text))
+    return html.unescape(plain).strip()
+
+
+def report_data(session, calc, sav):
+    """Структура для PDF-отчёта: всё уже отформатировано для человека."""
+    tools = sav.get("tools") or []
+    payback = sav.get("payback")
+    months = (f"{payback:.1f}".replace(".", ",").rstrip("0").rstrip(",")
+              if payback and payback < 10 else
+              (str(int(round(payback))) if payback else "—"))
+    budget = (f"{money(sav.get('impl_low', 0))}–{money(sav.get('impl_high', 0))} разово")
+    support = ""
+    if sav.get("support_high"):
+        support = (f"{money(sav['support_low'])}–{money(sav['support_high'])}/мес")
+    return {
+        "title": f"Отчёт оптимизатора · {calc.get('sphere_label') or ''}".strip(),
+        "slug": session.get("sphere") or "",
+        "date": time.strftime("%d.%m.%Y"),
+        "who": roles_summary(session) or "—",
+        "people": fmt(calc.get("people", 1)),
+        "rate": f"{money(calc.get('rate', 0))}/ч",
+        "headline": (f"{fmt(calc.get('hours', 0))} ч/мес рутины · "
+                     f"{money(calc.get('cost_month', 0))}/мес"),
+        "ops": [{"title": op["label"],
+                 "value": f"{op['hours']} ч/мес",
+                 "note": op.get("detail", "")}
+                for op in sorted(calc.get("ops") or [], key=lambda o: -o["hours"])],
+        "figures": [
+            ("Рутина сейчас", f"{fmt(calc.get('hours', 0))} ч/мес"),
+            ("Забираем автоматизацией",
+             f"{int(round((sav.get('factor') or 0) * 100))}%"),
+            ("Экономия", f"{fmt(sav.get('saved_hours', 0))} ч/мес"),
+            ("В деньгах", f"{money(sav.get('saved_money', 0))}/мес · "
+                          f"{money(sav.get('saved_year', 0))}/год"),
+            ("Освобождается на человека",
+             f"{fmt(sav.get('saved_hours', 0) / max(1, calc.get('people', 1)))} ч/мес"),
+            ("Окупаемость", f"~{months} мес"),
+        ],
+        "tools": [{"title": t["label"],
+                   "value": f"{money(t['impl'][0])}–{money(t['impl'][1])} разово",
+                   "note": t.get("what", "")}
+                  for t in tools],
+        "budget": [("Бюджет внедрения", budget), ("Сопровождение", support or "—")],
+        "steps": [dict(step, num=i) for i, step in enumerate(checklist_steps(calc, sav),
+                                                              start=1)],
+        "disclaimer": strip_html(DISCLAIMER),
+        "channel": CHANNEL_URL,
+    }
 
 
 def text_rollout(sav):
@@ -999,6 +1109,29 @@ def on_feedback(session, _arg=None):
     return session, emit(TEXT_FEEDBACK_PROMPT)
 
 
+def on_pdf(session, _arg=None):
+    """Кнопка «Полный отчёт (PDF)»: транспорт соберёт файл из `pdf`.
+
+    Если генерация или загрузка не получится, транспорт отправит `pdf_fallback`
+    — развёрнутый чек-лист текстом, чтобы человек не остался ни с чем.
+    """
+    calc = session.get("calc") or {}
+    sav = session.get("sav") or {}
+    if not calc or not sav:
+        return session, emit(
+            "PDF собирается из вашего расчёта — сначала пройдём шаги. "
+            "Начнём с сферы деятельности?",
+            keyboard_sphere())
+    data = report_data(session, calc, sav)
+    return session, [{
+        "text": ("Готовлю полный отчёт: рутина по операциям, экономия, бюджет "
+                 "и чек-лист с пояснениями."),
+        "pdf": data,
+        "pdf_fallback": checklist_full_text(calc, sav),
+        "buttons": keyboard_final(),
+    }]
+
+
 HANDLERS = {
     "s": on_sphere,
     "m": on_mode,
@@ -1007,6 +1140,7 @@ HANDLERS = {
     "n": on_more,
     "o": on_op,
     "t": on_tool,
+    "p": on_pdf,
     "fb": on_feedback,
 }
 
@@ -1040,7 +1174,8 @@ def dispatch_text(text, session):
                        f"рутины · ~{money(calc.get('cost_month', 0))}/мес.")
         messages = emit(
             TEXT_FEEDBACK_DONE + summary,
-            [[btn("🔧 Оптимизатор заново", "opt:again")],
+            [[btn("📄 Полный отчёт (PDF)", "opt:p:report")],
+             [btn("🔧 Оптимизатор заново", "opt:again")],
              [{"type": "link", "text": "Канал про автоматизацию",
                "url": CHANNEL_URL}]])
         # «admin» — сигнал транспорту переслать этот текст владельцу

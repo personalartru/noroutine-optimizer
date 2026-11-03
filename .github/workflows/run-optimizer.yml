@@ -17,6 +17,7 @@ on:
     paths:
       - "optimizer.py"
       - "max_bot.py"
+      - "report_pdf.py"
       - "requirements.txt"
       - ".github/workflows/run-optimizer.yml"
 
