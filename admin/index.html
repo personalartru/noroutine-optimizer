@@ -321,6 +321,16 @@ function validate() {
       if (group === "texts" && value.length > limits.text_chunk && !value.includes("\n\n"))
         warnings.push(`${path}: ${value.length} символов без пустой строки — ` +
                       `сообщение разрежется по середине абзаца`);
+      /* Ведущие пустые строки — часть вёрстки: они отделяют текст от того, что
+         бот написал до него. Старая сборка страницы теряла первую строку на
+         каждом сохранении, поэтому расхождение с файлом показываем сразу. */
+      const original = pathGet(S.loaded, path);
+      if (typeof original === "string") {
+        const lead = s => s.length - s.replace(/^\n+/, "").length;
+        if (lead(original) && lead(value) !== lead(original))
+          warnings.push(`${path}: пустых строк в начале было ${lead(original)}, стало ${lead(value)} — ` +
+                        `в чате текст прилипнет к предыдущей строке`);
+      }
     });
   }
 

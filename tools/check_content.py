@@ -369,5 +369,52 @@ check("админка ставит значение textarea свойством,
 check("страница читает content.json и справочник",
       "content.json" in src and "content.schema.json" in src)
 
+# ── 10. Ведущие пустые строки не потеряны ─────────────────────────────────────
+# Пустая строка перед текстом — часть вёрстки сообщения: она отделяет ответ бота
+# от строк, которые он написал до этого. Старая сборка админки съедала её на
+# каждом сохранении, и бот начинал печатать «Сопровождение:» впритык к предыдущей
+# строке. Чек ловит такие правки в файле, какой бы путь они ни пришли.
+flat = json.load(open(CONTENT_PATH, encoding="utf-8"))
+
+
+def string_paths(node, prefix=""):
+    out = []
+    if isinstance(node, str):
+        return [prefix]
+    if isinstance(node, list):
+        for i, value in enumerate(node):
+            out += string_paths(value, f"{prefix}.{i}")
+    elif isinstance(node, dict):
+        for key, value in node.items():
+            out += string_paths(value, f"{prefix}.{key}" if prefix else key)
+    return out
+
+
+def at(tree, dotted):
+    cur = tree
+    for part in dotted.split("."):
+        if isinstance(cur, list):
+            cur = cur[int(part)] if int(part) < len(cur) else None
+        elif isinstance(cur, dict):
+            cur = cur.get(part)
+        else:
+            return None
+    return cur
+
+
+flattened = []
+for group in ("texts", "buttons", "words", "catalog"):
+    for rel in string_paths(content.DEFAULTS[group]):
+        path = f"{group}.{rel}"
+        base, value = at(content.DEFAULTS, path), at(flat, path)
+        if not isinstance(base, str) or not isinstance(value, str):
+            continue
+        lead_base = len(base) - len(base.lstrip("\n"))
+        lead_value = len(value) - len(value.lstrip("\n"))
+        if lead_base and lead_value != lead_base:
+            flattened.append(f"{path}: ведущих пустых строк {lead_value} вместо {lead_base}")
+check("ни один текст не потерял ведущие пустые строки", not flattened,
+      "; ".join(flattened[:4]))
+
 print(f"\n{sum(results)}/{len(results)} проверок пройдено")
 sys.exit(0 if all(results) else 1)
