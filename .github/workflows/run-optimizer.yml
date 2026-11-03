@@ -96,6 +96,9 @@ jobs:
           # где вы уже читаете лиды. Без него — в собственный диалог «Оптимизатора».
           LEAD_MAX_BOT_TOKEN: ${{ secrets.LEAD_MAX_BOT_TOKEN }}
           LEAD_MAX_ADMIN_CHAT_ID: ${{ secrets.LEAD_MAX_ADMIN_CHAT_ID || '60669315' }}
+          # Резервный chat_id вашего диалога с этим ботом: сработает, только если
+          # кэш состояния пуст; свежий chat_id из события важнее.
+          MAX_ADMIN_DIALOG_ID: ${{ vars.MAX_ADMIN_DIALOG_ID || '583859747' }}
           MAX_CHANNEL_URL: ${{ vars.MAX_CHANNEL_URL || 'https://max.ru/channel_noroutine' }}
           BOT_RUN_MINUTES: ${{ inputs.minutes || '9' }}
           REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt

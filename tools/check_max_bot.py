@@ -324,6 +324,18 @@ results.append(check("при старте следующего круга оче
 max_bot.call = real_call
 max_bot.LEAD_BOT_TOKEN, max_bot.LEAD_ADMIN_CHAT_ID = saved_lead
 
+# 12c. Тихий круг без событий не обрывает цепочку кэша: файлы состояния есть всегда
+STATE_FILES = (max_bot.OFFSET_FILE, max_bot.DIALOGS_FILE, max_bot.SESSIONS_FILE,
+               max_bot.ADMIN_PENDING_FILE)
+for path in STATE_FILES:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+max_bot.bootstrap_state()
+results.append(check("после bootstrap_state все файлы состояния существуют",
+                     all(os.path.exists(p) for p in STATE_FILES)))
+
 # 13. Запуск без токена честно говорит о проблеме, а не крутит пустой цикл
 saved, max_bot.TOKEN = max_bot.TOKEN, ""
 results.append(check("без MAX_BOT_TOKEN main() возвращает 2", max_bot.main() == 2))

@@ -35,6 +35,7 @@ ADMIN_CHAT_ID = os.environ.get("MAX_ADMIN_CHAT_ID", "")
 # LEAD_MAX_BOT_TOKEN; без него пишем в собственный диалог «Оптимизатора».
 LEAD_BOT_TOKEN = os.environ.get("LEAD_MAX_BOT_TOKEN", "")
 LEAD_ADMIN_CHAT_ID = os.environ.get("LEAD_MAX_ADMIN_CHAT_ID", "") or ADMIN_CHAT_ID
+# Резервный chat_id диалога владельца на случай холодного кэша состояния.
 ADMIN_DIALOG_ID = os.environ.get("MAX_ADMIN_DIALOG_ID", "")
 RUN_MINUTES = float(os.environ.get("BOT_RUN_MINUTES", "9") or 9)
 OFFSET_FILE = os.environ.get("MAX_OFFSET_FILE", ".max_offset")
@@ -134,13 +135,15 @@ def admin_routes():
        там владелец уже читает заявки, поэтому это основной путь;
     2. собственный диалог «Оптимизатора» с владельцем — chat_id из события
        (`chat_id` диалога НЕ равен `user_id`, иначе 404 chat.not.found);
+       свежее значение из .max_dialogs.json важнее резервного
+       `MAX_ADMIN_DIALOG_ID`, чтобы не застрять на удалённом диалоге;
     3. голый `user_id` владельца — последняя попытка, когда диалог ещё не
        запомнен (кэш состояния пуст).
     """
     routes = []
     if LEAD_BOT_TOKEN and LEAD_ADMIN_CHAT_ID:
         routes.append((LEAD_BOT_TOKEN, LEAD_ADMIN_CHAT_ID, "лид-бот @se14730534_bot"))
-    dialog = ADMIN_DIALOG_ID or (dialog_for(ADMIN_CHAT_ID) if ADMIN_CHAT_ID else None)
+    dialog = (dialog_for(ADMIN_CHAT_ID) if ADMIN_CHAT_ID else None) or ADMIN_DIALOG_ID
     if dialog:
         routes.append((TOKEN, dialog, f"свой диалог {dialog}"))
     if ADMIN_CHAT_ID and ADMIN_CHAT_ID != dialog:
@@ -326,6 +329,22 @@ def save_offset(offset):
         pass
 
 
+def bootstrap_state():
+    """Файлы состояния пишем до первого же события, а не после него.
+
+    `actions/cache/save@v4` отказывается сохранять кэш, когда ни одного из
+    перечисленных путей нет: круг без сообщений не создавал `.max_offset` и
+    `.max_dialogs.json`, цепочка кэша обрывалась («Path Validation Error» →
+    «Cache save failed» → в следующем цикле «Cache not found»), и бот
+    стартовал с offset 0 и без памяти о диалоге владельца.
+    """
+    save_offset(load_offset())
+    save_json(DIALOGS_FILE, load_json(DIALOGS_FILE))
+    save_sessions(load_sessions())
+    if not os.path.exists(ADMIN_PENDING_FILE):
+        save_json(ADMIN_PENDING_FILE, {"leads": []})
+
+
 # ── Оптимизатор ──────────────────────────────────────────────────────────────
 def deliver_messages(user_id, chat_id, messages, callback_id=None):
     """Шаги — отдельными сообщениями, как их собрал optimizer.py.
@@ -477,6 +496,7 @@ def main():
           f"заявки: {routes[0][2] if routes else 'некуда слать (только очередь)'} · "
           f"кнопка на финале: {optimizer.CHANNEL_URL}")
     flush_admin_leads()
+    bootstrap_state()
     next_flush = time.time() + 60
 
     while time.time() < deadline:
