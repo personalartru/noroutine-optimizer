@@ -94,8 +94,11 @@ jobs:
           MAX_ADMIN_CHAT_ID: ${{ secrets.MAX_ADMIN_CHAT_ID || '60669315' }}
           # Токен старого лид-бота @se14730534_bot: заявка уходит в тот диалог,
           # где вы уже читаете лиды. Без него — в собственный диалог «Оптимизатора».
+          # address — user_id (личка), не chat_id: chat_id=60669315 = 404 chat.not.found.
           LEAD_MAX_BOT_TOKEN: ${{ secrets.LEAD_MAX_BOT_TOKEN }}
           LEAD_MAX_ADMIN_CHAT_ID: ${{ secrets.LEAD_MAX_ADMIN_CHAT_ID || '60669315' }}
+          # Точный chat_id диалога с лид-ботом — если задан, пробуется раньше user_id.
+          LEAD_MAX_ADMIN_DIALOG_ID: ${{ vars.LEAD_MAX_ADMIN_DIALOG_ID }}
           # Резервный chat_id вашего диалога с этим ботом: сработает, только если
           # кэш состояния пуст; свежий chat_id из события важнее.
           MAX_ADMIN_DIALOG_ID: ${{ vars.MAX_ADMIN_DIALOG_ID || '583859747' }}

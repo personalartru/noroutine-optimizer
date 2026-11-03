@@ -8,6 +8,7 @@
   тогда отвечаем на callback, и клик не теряется;
 - chat_id диалога НЕ равен user_id: писать нужно на chat_id из события,
   иначе 404 chat.not.found — соответствие помним в .max_dialogs.json;
+  в личку по идентификатору пользователя MAX ждёт параметр user_id, а не chat_id;
 - заявка с финального шага уходит в диалог старого лид-бота @se14730534_bot
   (секрет LEAD_MAX_BOT_TOKEN), где владелец уже читает лиды; если токена нет —
   в собственный диалог с владельцем; если не дошла — ждёт повтора в
@@ -34,7 +35,13 @@ ADMIN_CHAT_ID = os.environ.get("MAX_ADMIN_CHAT_ID", "")
 # старым лид-ботом @se14730534_bot. Его токен — отдельный секрет
 # LEAD_MAX_BOT_TOKEN; без него пишем в собственный диалог «Оптимизатора».
 LEAD_BOT_TOKEN = os.environ.get("LEAD_MAX_BOT_TOKEN", "")
-LEAD_ADMIN_CHAT_ID = os.environ.get("LEAD_MAX_ADMIN_CHAT_ID", "") or ADMIN_CHAT_ID
+# `MAX_ADMIN_CHAT_ID` и `LEAD_MAX_ADMIN_CHAT_ID` — это user_id владельца,
+# а не chat_id диалога: в MAX POST /messages принимает либо chat_id (чат или
+# канал), либо user_id (личка). chat_id=60669315 даёт 404 chat.not.found.
+LEAD_ADMIN_USER_ID = os.environ.get("LEAD_MAX_ADMIN_CHAT_ID", "") or ADMIN_CHAT_ID
+# Точный chat_id диалога с лид-ботом, если владелец его знает и задаст:
+# надёжнее, чем user_id, и проверяется раньше.
+LEAD_ADMIN_DIALOG_ID = os.environ.get("LEAD_MAX_ADMIN_DIALOG_ID", "")
 # Резервный chat_id диалога владельца на случай холодного кэша состояния.
 ADMIN_DIALOG_ID = os.environ.get("MAX_ADMIN_DIALOG_ID", "")
 RUN_MINUTES = float(os.environ.get("BOT_RUN_MINUTES", "9") or 9)
@@ -129,25 +136,34 @@ def answer_callback(callback_id, text):
 
 
 def admin_routes():
-    """Куда слать заявку, в порядке предпочтения.
+    """Куда слать заявку, в порядке предпочтения: (токен, query, подпись).
 
     1. Диалог старого лид-бота @se14730534_bot (токен из `LEAD_MAX_BOT_TOKEN`) —
-       там владелец уже читает заявки, поэтому это основной путь;
+       там владелец уже читает заявки, поэтому это основной путь. Пишем по
+       `user_id`: по документации MAX это параметр «отправить сообщение
+       пользователю», а `chat_id` нужен для чата или канала. Если задан
+       `LEAD_MAX_ADMIN_DIALOG_ID`, пробуем и его — точный chat_id диалога
+       надёжнее;
     2. собственный диалог «Оптимизатора» с владельцем — chat_id из события
        (`chat_id` диалога НЕ равен `user_id`, иначе 404 chat.not.found);
        свежее значение из .max_dialogs.json важнее резервного
        `MAX_ADMIN_DIALOG_ID`, чтобы не застрять на удалённом диалоге;
-    3. голый `user_id` владельца — последняя попытка, когда диалог ещё не
-       запомнен (кэш состояния пуст).
+    3. `user_id` владельца своим токеном — последняя попытка, когда диалог ещё
+       не запомнен (кэш состояния пуст).
     """
     routes = []
-    if LEAD_BOT_TOKEN and LEAD_ADMIN_CHAT_ID:
-        routes.append((LEAD_BOT_TOKEN, LEAD_ADMIN_CHAT_ID, "лид-бот @se14730534_bot"))
+    if LEAD_BOT_TOKEN:
+        if LEAD_ADMIN_DIALOG_ID:
+            routes.append((LEAD_BOT_TOKEN, {"chat_id": LEAD_ADMIN_DIALOG_ID},
+                           f"лид-бот @se14730534_bot (диалог {LEAD_ADMIN_DIALOG_ID})"))
+        if LEAD_ADMIN_USER_ID:
+            routes.append((LEAD_BOT_TOKEN, {"user_id": LEAD_ADMIN_USER_ID},
+                           f"лид-бот @se14730534_bot (user_id {LEAD_ADMIN_USER_ID})"))
     dialog = (dialog_for(ADMIN_CHAT_ID) if ADMIN_CHAT_ID else None) or ADMIN_DIALOG_ID
     if dialog:
-        routes.append((TOKEN, dialog, f"свой диалог {dialog}"))
+        routes.append((TOKEN, {"chat_id": dialog}, f"свой диалог {dialog}"))
     if ADMIN_CHAT_ID and ADMIN_CHAT_ID != dialog:
-        routes.append((TOKEN, ADMIN_CHAT_ID, f"user_id {ADMIN_CHAT_ID}"))
+        routes.append((TOKEN, {"user_id": ADMIN_CHAT_ID}, f"user_id {ADMIN_CHAT_ID}"))
     return routes
 
 
@@ -169,9 +185,9 @@ def send_admin_lead(text):
               "и MAX_ADMIN_CHAT_ID — текст только в очереди на повтор")
         queue_admin_lead(text)
         return False
-    for token, chat_id, label in routes:
+    for token, query, label in routes:
         try:
-            call("POST", "messages", query={"chat_id": chat_id},
+            call("POST", "messages", query=query,
                  body={"text": text, "format": "html", "notify": True},
                  token=token)
             print(f"Заявка отправлена владельцу -> {label}")

@@ -58,8 +58,10 @@ def reset():
 
 
 def messages_to(chat=DIALOG):
+    """Сообщения адресату: MAX принимает либо chat_id, либо user_id."""
     return [s for s in SENT if s["path"] == "messages"
-            and s["query"].get("chat_id") == chat]
+            and (s["query"].get("chat_id") == chat
+                 or s["query"].get("user_id") == chat)]
 
 
 def texts_to(chat=DIALOG):
@@ -277,23 +279,47 @@ results.append(check("нет ссылки на калькулятор сайта
                      "калькуляторе на сайте" not in all_text))
 
 # 12b. Куда уходит заявка: чат лид-бота → свой диалог → очередь повторов
-saved_lead = (max_bot.LEAD_BOT_TOKEN, max_bot.LEAD_ADMIN_CHAT_ID)
+saved_lead = (max_bot.LEAD_BOT_TOKEN, max_bot.LEAD_ADMIN_USER_ID,
+              max_bot.LEAD_ADMIN_DIALOG_ID)
+saved_admin = (max_bot.ADMIN_CHAT_ID, max_bot.ADMIN_DIALOG_ID)
 reset()
-max_bot.LEAD_BOT_TOKEN, max_bot.LEAD_ADMIN_CHAT_ID = "lead-token", "999"
+max_bot.LEAD_BOT_TOKEN, max_bot.LEAD_ADMIN_USER_ID = "lead-token", "999"
+max_bot.LEAD_ADMIN_DIALOG_ID = ""
 ok = max_bot.send_admin_lead("📩 Расчёт из «Оптимизатора»\nтест")
-results.append(check("с LEAD_MAX_BOT_TOKEN заявка идёт его токеном в чат лид-бота",
+results.append(check("с LEAD_MAX_BOT_TOKEN заявка идёт его токеном в личку владельца",
                      ok and len(SENT) == 1
-                     and SENT[0]["query"].get("chat_id") == "999"
+                     and SENT[0]["query"] == {"user_id": "999"}
                      and SENT[0]["token"] == "lead-token"))
 
+# если задан точный chat_id диалога с лид-ботом — он важнее user_id
+max_bot.LEAD_ADMIN_DIALOG_ID = "485434975"
+reset()
+ok = max_bot.send_admin_lead("заявка по chat_id")
+results.append(check("LEAD_MAX_ADMIN_DIALOG_ID пробуют раньше, чем user_id",
+                     ok and len(SENT) == 1
+                     and SENT[0]["query"] == {"chat_id": "485434975"}
+                     and SENT[0]["token"] == "lead-token"))
+max_bot.LEAD_ADMIN_DIALOG_ID = ""
+
 # без токена лид-бота — в запомненный диалог владельца, а не на голый user_id
-max_bot.LEAD_BOT_TOKEN, max_bot.LEAD_ADMIN_CHAT_ID = "", ""
+max_bot.LEAD_BOT_TOKEN, max_bot.LEAD_ADMIN_USER_ID = "", ""
 json.dump({"999": "583859747"}, open(os.environ["MAX_DIALOGS_FILE"], "w"))
 reset()
 ok = max_bot.send_admin_lead("заявка в свой диалог")
 chats = [s["query"].get("chat_id") for s in SENT if s["path"] == "messages"]
 results.append(check("без него пишет в диалог владельца, а не на user_id (404 fix)",
                      ok and chats == ["583859747"]))
+
+# кэш пуст и диалог не запомнен — id владельца уходят параметром user_id,
+# а не chat_id (chat_id=60669315 в MAX = 404 chat.not.found)
+os.remove(os.environ["MAX_DIALOGS_FILE"])
+max_bot.ADMIN_CHAT_ID = "60669315"
+max_bot.ADMIN_DIALOG_ID = ""
+reset()
+ok = max_bot.send_admin_lead("холодный кэш")
+results.append(check("без запомненного диалога id владельца уходит параметром user_id",
+                     ok and SENT[0]["query"] == {"user_id": "60669315"}))
+(max_bot.ADMIN_CHAT_ID, max_bot.ADMIN_DIALOG_ID) = saved_admin
 
 # все маршруты умерли — текст не теряется, а ждёт повтора
 real_call = max_bot.call
@@ -322,7 +348,8 @@ results.append(check("при старте следующего круга оче
                      and "утраченная заявка" in flushed[0]["body"]["text"]
                      and not os.path.exists(pending_path)))
 max_bot.call = real_call
-max_bot.LEAD_BOT_TOKEN, max_bot.LEAD_ADMIN_CHAT_ID = saved_lead
+(max_bot.LEAD_BOT_TOKEN, max_bot.LEAD_ADMIN_USER_ID,
+ max_bot.LEAD_ADMIN_DIALOG_ID) = saved_lead
 
 # 12c. Тихий круг без событий не обрывает цепочку кэша: файлы состояния есть всегда
 STATE_FILES = (max_bot.OFFSET_FILE, max_bot.DIALOGS_FILE, max_bot.SESSIONS_FILE,
