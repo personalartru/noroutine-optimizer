@@ -387,6 +387,12 @@ def main():
     deadline = time.time() + minutes * 60
     print(f"MAX-бот «Оптимизатор» запущен (версия {code_sha()}), "
           f"offset {offset}, лимит {minutes} мин")
+    # Проверка токена до первого же обновления: на неверном ключе /me молчит,
+    # и иначе цикл крутил бы 9 минут впустую.
+    who = bot_username()
+    print(f"аккаунт: @{who or 'не опознан — проверьте MAX_BOT_TOKEN'} · "
+          f"заявки: чат {ADMIN_CHAT_ID or 'не задан (только лог)'} · "
+          f"ссылка на лид-бота: {optimizer.LEAD_BOT_URL}")
 
     while time.time() < deadline:
         try:
