@@ -2,8 +2,8 @@
 
 Логика шести шагов целиком в optimizer.py, формулировки и каталог — в content.py
 (с поверх кодовых дефолтов ложится content.json из репозитория); здесь только
-long polling MAX, доставка шагов в личку, ответы на нажатия кнопок и пересылка
-заявки владельцу.
+long polling MAX, доставка шагов в личку, ответы на нажатия кнопок, пересылка
+заявки владельцу и горячая подгрузка контента.
 
 Как это работает с MAX:
 - бот пишет только тем, кто его запустил, поэтому личка может быть недоступна —
@@ -15,7 +15,9 @@ long polling MAX, доставка шагов в личку, ответы на �
   (секрет LEAD_MAX_BOT_TOKEN), где владелец уже читает лиды; если токена нет —
   в собственный диалог с владельцем; если не дошла — ждёт повтора в
   .max_admin_pending.json;
-- каждое сообщение режется по 900 символов (см. optimizer.TEXT_CHUNK).
+- каждое сообщение режется по 900 символов (см. optimizer.TEXT_CHUNK);
+- правки админки видны не в следующем круге Actions, а в этом: цикл сверяется
+  с content.json в main (try_refresh_content) и меняет оверлей на лету.
 
 Запуск: python max_bot.py [--minutes N]
 """
@@ -59,15 +61,32 @@ ADMIN_PENDING_FILE = os.environ.get("MAX_ADMIN_PENDING_FILE", ".max_admin_pendin
 ADMIN_PENDING_MAX = 50
 BOT_USERNAME = os.environ.get("MAX_BOT_USERNAME", "")
 
-TEXT_UNKNOWN = content.text("start_hint")
-"""Встреча и ответ на чужую кнопку до входа в расчёт.
+# Горячая подгрузка контента: как часто смотреть content.json в main прямо
+# внутри живого цикла. 0 или меньше — подгрузка выключена, цикл работает на
+# файле из checkout (как было раньше). Нижняя граница 5 с — чтобы опечатка в
+# переменной не превратила цикл в гонку за API.
+CONTENT_REFRESH_SECONDS = float(os.environ.get("CONTENT_REFRESH_SECONDS", "45") or 45)
+if CONTENT_REFRESH_SECONDS > 0:
+    CONTENT_REFRESH_SECONDS = max(5.0, CONTENT_REFRESH_SECONDS)
+# Сюда кладём скачанный файл: боевой content.json из checkout не трогаем, чтобы
+# `git status` прогона оставался чистым, а tools/check_content.py работал с
+# репозиторием.
+CONTENT_LIVE_FILE = os.environ.get("MAX_CONTENT_LIVE_FILE", ".content_live.json")
+CONTENT_WATCH = {"digest": None, "next": 0.0}
 
-Значение приходит из content.py (а поверх — content.json из админки), поэтому
-формулировку правят без пулла в код. Читается на импорте: каждый круг Actions —
-свежий процесс, и следующий круг уже видит новую строку.
+TEXT_UNKNOWN_KEY = "start_hint"
+"""Ключ встречи и ответа на чужую кнопку до входа в расчёт.
+
+Не строка, а именно ключ: значение читается на каждом ответе, поэтому правка из
+админки видна со следующего же сообщения, а не со следующего круга Actions.
 """
 TEXT_NO_TOKEN = ("MAX_BOT_TOKEN не задан — бот не может опрашивать MAX. "
                  "Добавьте секрет и перезапустите цикл.")
+
+
+def text_unknown():
+    """Встреча для незнакомой кнопки или сообщения — всегда из свежего контента."""
+    return content.text(TEXT_UNKNOWN_KEY)
 
 
 def btn(text, payload):
@@ -373,6 +392,17 @@ def save_json(path, data):
         return False
 
 
+def save_text(path, text):
+    """Как save_json, только уже готовый текст: скачанный файл не пересобираем."""
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        return True
+    except OSError as e:
+        print(f"Не удалось сохранить {path}:", e)
+        return False
+
+
 def code_sha():
     """Версия кода — чтобы по логу видеть, какой коммит работает."""
     import subprocess
@@ -488,6 +518,107 @@ def bootstrap_state():
         save_json(ADMIN_PENDING_FILE, {"leads": []})
 
 
+# ── Горячая подгрузка контента ───────────────────────────────────────────────
+def content_source():
+    """Откуда брать content.json main'а: (url, заголовки) или ("", {}) если нечего.
+
+    Новых секретов подгрузка не просит: у шага в Actions уже есть GITHUB_TOKEN,
+    а репозиторий публичный. Вне Actions (тесты, ручной запуск) переменных
+    GITHUB_* нет, и функция честно возвращает пустую ссылку — цикл работает на
+    файле из checkout.
+
+    С токена идём в API, без него на raw.githubusercontent: оба могут отдать
+    ответ из кэша (CDN держит raw до 5 минут), поэтому в url каждый осмотр новый
+    «свежающий» параметр — с ним кэш не в силах соврать про версию файла.
+    """
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    if not repo or CONTENT_REFRESH_SECONDS <= 0:
+        return "", {}
+    ref = os.environ.get("GITHUB_REF_NAME", "") or "main"
+    fresh = int(time.time())
+    headers = {"Cache-Control": "no-cache"}
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if token:
+        return (f"https://api.github.com/repos/{repo}/contents/content.json"
+                f"?ref={ref}&_={fresh}",
+                {**headers, "Authorization": f"Bearer {token}",
+                 "Accept": "application/vnd.github.raw+json"})
+    return (f"https://raw.githubusercontent.com/{repo}/{ref}/content.json?_={fresh}",
+            headers)
+
+
+def fetch_content(url, headers):
+    """Текст content.json из main или None: сетевая осечка не роняет цикл."""
+    try:
+        r = requests.get(url, headers=headers, timeout=15)
+    except requests.RequestException as e:
+        print("::warning::content.json не скачался:", str(e)[:160],
+              "— оставляю прежний оверлей")
+        return None
+    if r.status_code != 200:
+        print(f"::warning::content.json: HTTP {r.status_code} — оставляю прежний оверлей")
+        return None
+    return r.text
+
+
+def start_content_watch():
+    """Запомнить хэш файла, на котором цикл стартовал, и срок следующего осмотра."""
+    digest = ""
+    try:
+        with open(content.CONTENT_FILE, "rb") as f:
+            digest = hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        pass
+    CONTENT_WATCH["digest"] = digest
+    CONTENT_WATCH["next"] = time.time() + CONTENT_REFRESH_SECONDS
+    return digest
+
+
+def try_refresh_content(force=False):
+    """Подхватить правку админки внутри живого цикла; True — если тексты сменились.
+
+    Зачем: content.json читается на старте процесса, цикл живёт ~9 минут, а
+    новый прогон ещё и ждёт слот concurrency. По прод-пушам контента это
+    35 с / 71 с / 2 мин 22 с / 4 мин 46 с и до ~9,5 мин в худшем случае. С
+    подгрузкой задержка — один шаг цикла.
+
+    Ничего не портим: осечка сети, HTTP-ошибка, битый JSON или не-объект
+    оставляют прежний оверлей, а content.json из checkout остаётся нетронутым —
+    скачанный файл живёт отдельно в CONTENT_LIVE_FILE.
+    """
+    url, headers = content_source()
+    if not url:
+        return False
+    if not force and time.time() < CONTENT_WATCH["next"]:
+        return False
+    CONTENT_WATCH["next"] = time.time() + CONTENT_REFRESH_SECONDS
+    raw = fetch_content(url, headers)
+    if raw is None:
+        return False
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    if digest == CONTENT_WATCH["digest"]:
+        return False
+    try:
+        parsed = json.loads(raw)
+    except ValueError as exc:
+        print(f"::warning::content.json из main не разбирается ({str(exc)[:120]}) — "
+              "оставляю прежний оверлей")
+        return False
+    if not isinstance(parsed, dict):
+        print("::warning::content.json из main: ожидался объект — оставляю прежний оверлей")
+        return False
+    if not save_text(CONTENT_LIVE_FILE, raw):
+        return False
+    content.CONTENT_FILE = CONTENT_LIVE_FILE
+    content.reload()
+    optimizer.refresh_catalog()
+    CONTENT_WATCH["digest"] = digest
+    print("контент обновлён из main без рестарта цикла:", content.source_summary())
+    for line in content.problems():
+        print(f"::warning::контент: {line}")
+    return True
+
+
 # ── Оптимизатор ──────────────────────────────────────────────────────────────
 def deliver_pdf(user_id, chat_id, message):
     """Отдать PDF по кнопке: файл с подписью, а если файла нет — текст-выручалочка.
@@ -581,7 +712,7 @@ def handle_callback(callback):
 
     if not payload.startswith("opt:"):
         # Кнопка из старого диалога (бот до переезда) — не теряем клик.
-        answer_callback(callback_id, TEXT_UNKNOWN)
+        answer_callback(callback_id, text_unknown())
         return
     handle_optimizer(user_id, chat_id, payload=payload, callback_id=callback_id,
                      name=user.get("name") or user.get("first_name") or "",
@@ -605,7 +736,7 @@ def handle_text(user_id, chat_id, name, username, text):
         handle_optimizer(user_id, chat_id, text=text, name=name, username=username)
         return
 
-    send_direct(user_id, TEXT_UNKNOWN,
+    send_direct(user_id, text_unknown(),
                 buttons=[[btn(content.label("start"), "opt:start")]],
                 chat_id=chat_id)
 
@@ -689,11 +820,24 @@ def main():
     print("контент:", content.source_summary())
     for line in content.problems():
         print(f"::warning::контент: {line}")
+    url, _ = content_source()
+    start_content_watch()
+    if url:
+        print(f"подгрузка контента: сверяюсь с main каждые "
+              f"{CONTENT_REFRESH_SECONDS:.0f} с — правка из админки "
+              "доезжает до следующего расчёта, не дожидаясь конца цикла")
+    else:
+        print("подгрузка контента: выключена (нет GITHUB_REPOSITORY или лимит 0) "
+              "— цикл говорит на файле из checkout")
     flush_admin_leads()
     bootstrap_state()
     next_flush = time.time() + 60
 
     while time.time() < deadline:
+        # Правку админки подхватываем на лету: без этого новый текст ждал бы
+        # конца цикла и слота в очереди (замерено до ~9,5 мин). В начале прохода,
+        # чтобы осечка MAX с `continue` не откладывала осмотр до следующего круга.
+        try_refresh_content()
         try:
             data = call("GET", "updates",
                         query={"offset": offset, "timeout": 20, "limit": 100})

@@ -5,8 +5,9 @@ name: Run optimizer bot (GitHub Actions)
 # прод сам, отдельный деплой не нужен.
 #
 # content.json в списке путей не случайно: админка правит текст именно им и
-# коммитит в main. Push от админки поднимает цикл сразу, не дожидаясь конца
-# цепочки, — правка видна в чате через минуту-две.
+# коммитит в main. Это страховка, а не основной путь: живой цикл сам сверяется
+# с content.json в main каждые ~45 секунд (max_bot.try_refresh_content), поэтому
+# правка видна в следующем расчёте, не дожидаясь слота очереди.
 
 on:
   workflow_dispatch:
@@ -111,6 +112,13 @@ jobs:
           MAX_ADMIN_DIALOG_ID: ${{ vars.MAX_ADMIN_DIALOG_ID || '583859747' }}
           MAX_CHANNEL_URL: ${{ vars.MAX_CHANNEL_URL || 'https://max.ru/channel_noroutine' }}
           BOT_RUN_MINUTES: ${{ inputs.minutes || '9' }}
+          # Правки админки цикл подхватывает на лету: раз в столько секунд
+          # сверяется с content.json в main. В переменных репозитория можно
+          # поставить 0 — тогда бот снова живёт только на файле из checkout.
+          CONTENT_REFRESH_SECONDS: ${{ vars.CONTENT_REFRESH_SECONDS || '45' }}
+          # Чтение контента из main: хватает permissions: contents: read.
+          # С токена идём в API, а не в raw-CDN, который держит файл до 5 минут.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
         run: python max_bot.py --minutes "${{ inputs.minutes || '9' }}"
       - name: Сохранить состояние

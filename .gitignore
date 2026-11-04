@@ -8,3 +8,7 @@ __pycache__/
 .max_optimizer.json
 optimizer-preview.html
 .max_admin_pending.json
+
+# Скачанный из main content.json для горячей подгрузки: живой цикл правит
+# оверлей на лету и пишет его сюда, боевой файл из checkout не трогает.
+.content_live.json

@@ -5,7 +5,8 @@
 → число сообщением → финал → заявка владельцу → отмена, чужая кнопка и
 просроченная сессия. Тексты проверяет simulate_optimizer.py, здесь — обвязка:
 маршрутизацию callbacks, хранение шага, доставку в личку, поведение без
-лички и то, что в новом боте нет лид-веток старого.
+лички, горячую подгрузку content.json из main и то, что в новом боте нет
+лид-веток старого.
 
     python3 tools/check_max_bot.py
 """
@@ -631,6 +632,197 @@ for part in optimizer.text_rollout(final.get("sav") or {}):
 lost = [p[:46] for p in from_rollout if p not in delivered]
 results.append(check("финальные тексты уходят целиком, с пустыми строками",
                      bool(from_rollout) and not lost, "; ".join(lost[:2])))
+
+# 15. Горячая подгрузка контента: правка админки доходит до чата в этом же цикле.
+#
+# Цикл стартует на content.json из checkout, а админка коммитит правку в main.
+# Без подгрузки текст ждал бы конца цикла и слота очереди: по прод-пушам это
+# 35 с / 71 с / 2 мин 22 с / 4 мин 46 с и до ~9,5 мин в худшем случае. Здесь
+# сеть подменена — проверяется и что оверлей меняется на лету, и что любая
+# осечка оставляет прежний текст.
+LIVE_TEXT = "ИЗ-ПОДГРУЗКИ: расчёт за шесть вопросов"
+LIVE_BUTTON = "🔄 ЗАМЕНА-ИЗ-ПОДГРУЗКИ"
+saved_source, saved_fetch = max_bot.content_source, max_bot.fetch_content
+saved_seconds, saved_live_file = max_bot.CONTENT_REFRESH_SECONDS, max_bot.CONTENT_LIVE_FILE
+saved_watch = dict(max_bot.CONTENT_WATCH)
+saved_content_file = content.CONTENT_FILE
+repo_content = os.path.join(REPO, "content.json")
+repo_before = open(repo_content, encoding="utf-8").read()
+CHECKS = []
+
+
+def watch_source():
+    """Ссылка «на main» — настоящий content_source её соберёт, здесь важна подмена."""
+    return ("https://api.github.com/repos/personalartru/noroutine-optimizer"
+            "/contents/content.json?ref=main", {})
+
+
+def serve(payload):
+    """Что вернёт «main» на следующий осмотр: текст файла, объект или None (осечка)."""
+    raw = payload if payload is None or isinstance(payload, str) \
+        else json.dumps(payload, ensure_ascii=False)
+
+    def _fetch(url, headers):
+        CHECKS.append(url)
+        return raw
+
+    max_bot.fetch_content = _fetch
+    return raw
+
+
+max_bot.content_source = watch_source
+max_bot.CONTENT_REFRESH_SECONDS = 45
+max_bot.CONTENT_LIVE_FILE = os.path.join(WORKDIR, ".content_live.json")
+max_bot.start_content_watch()
+results.append(check("первый осмотр отложен, а не «сейчас»",
+                     max_bot.CONTENT_WATCH["next"] > time.time(),
+                     str(max_bot.CONTENT_WATCH["digest"])[:12]))
+
+serve({"schema": content.SCHEMA, "texts": {"intro": LIVE_TEXT},
+       "buttons": {"reset": LIVE_BUTTON}})
+changed = max_bot.try_refresh_content(force=True)
+results.append(check("правка из main подхватывается внутри живого цикла",
+                     changed is True and content.text("intro") == LIVE_TEXT,
+                     str(content.text("intro")[:40])))
+results.append(check("подгрузка пишет скачанный файл рядом, а не в checkout",
+                     content.CONTENT_FILE == max_bot.CONTENT_LIVE_FILE
+                     and open(repo_content, encoding="utf-8").read() == repo_before))
+del SENT[:]
+max_bot.handle_bot_started({"user": {"user_id": USER2, "name": "Павел"},
+                            "chat_id": DIALOG2})
+results.append(check("новый текст уходит в чат без перезапуска цикла",
+                     any(LIVE_TEXT in t for t in texts_to(DIALOG2)),
+                     str(texts_to(DIALOG2)[:1])))
+# «Сброс» виден со шага выбора людей: на шаге сфер кнопок-действий нет.
+click("opt:s:it", user=USER2, callback_id="cb15")
+results.append(check("новая подпись кнопки видна в клавиатуре без рестарта",
+                     content.label("reset") == LIVE_BUTTON
+                     and any(b.get("payload") == "opt:reset"
+                             and b.get("text") == LIVE_BUTTON
+                             for b in all_buttons(DIALOG2))))
+
+cta_now = content.get("texts.rollout.cta") or ""
+lead_now = len(cta_now) - len(cta_now.lstrip("\n"))
+LIVE_CTA = "\n" * lead_now + "ПРАВКА-ИЗ-ПОДГРУЗКИ"
+serve({"schema": content.SCHEMA,
+       "texts": {"intro": LIVE_TEXT, "rollout": {"cta": LIVE_CTA}}})
+max_bot.try_refresh_content(force=True)
+cta_after = content.get("texts.rollout.cta") or ""
+results.append(check("подгрузка сохраняет ведущие пустые строки вёрстки",
+                     lead_now > 0 and content.text("intro") == LIVE_TEXT
+                     and cta_after == LIVE_CTA
+                     and len(cta_after) - len(cta_after.lstrip("\n")) == lead_now,
+                     f"{lead_now} строк(и) в начале"))
+
+same_digest = max_bot.CONTENT_WATCH["digest"]
+results.append(check("тот же файл из main не пересобирает оверлей второй раз",
+                     max_bot.try_refresh_content(force=True) is False
+                     and max_bot.CONTENT_WATCH["digest"] == same_digest))
+checks_after = len(CHECKS)
+max_bot.CONTENT_WATCH["next"] = time.time() + 45
+results.append(check("между осмотрами цикл не дёргает API",
+                     max_bot.try_refresh_content() is False
+                     and len(CHECKS) == checks_after))
+
+good_live = open(max_bot.CONTENT_LIVE_FILE, encoding="utf-8").read()
+broken = []
+for label, payload in (("битый JSON", "{ это не json"),
+                       ("не-объект", "[1, 2, 3]"),
+                       ("осечка сети", None)):
+    serve(payload)
+    ok = max_bot.try_refresh_content(force=True)
+    if ok is not False or content.CONTENT_FILE != max_bot.CONTENT_LIVE_FILE \
+            or open(max_bot.CONTENT_LIVE_FILE, encoding="utf-8").read() != good_live:
+        broken.append(label)
+results.append(check("битый файл, не-объект и сетевой сбой оставляют прежний оверлей",
+                     not broken, "; ".join(broken)))
+
+# Маршрут подгрузки проверяем настоящим content_source: от него зависит, не
+# съест ли правку кэш и хватит ли уже имеющегося токена.
+saved_env = {k: os.environ.get(k) for k in
+             ("GITHUB_REPOSITORY", "GITHUB_REF_NAME", "GITHUB_TOKEN")}
+
+
+def env(**kwargs):
+    for key, value in kwargs.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+
+
+max_bot.content_source = saved_source
+env(GITHUB_REPOSITORY="personalartru/noroutine-optimizer", GITHUB_REF_NAME="main",
+    GITHUB_TOKEN="gha-token")
+url_api, hdr_api = max_bot.content_source()
+env(GITHUB_TOKEN=None)
+url_raw, hdr_raw = max_bot.content_source()
+max_bot.CONTENT_REFRESH_SECONDS = 0
+url_off, hdr_off = max_bot.content_source()
+max_bot.CONTENT_REFRESH_SECONDS = 45
+env(GITHUB_REPOSITORY=None)
+url_none, _ = max_bot.content_source()
+results.append(check("с GITHUB_TOKEN контент берётся из API (raw-CDN держит файл минут 5)",
+                     url_api.startswith("https://api.github.com/repos/"
+                                        "personalartru/noroutine-optimizer/"
+                                        "contents/content.json?ref=main&_=")
+                     and hdr_api.get("Accept") == "application/vnd.github.raw+json"
+                     and hdr_api.get("Authorization") == "Bearer gha-token",
+                     url_api))
+results.append(check("без токена — raw с «свежающим» параметром",
+                     "raw.githubusercontent.com" in url_raw
+                     and "personalartru/noroutine-optimizer/main/content.json?_=" in url_raw
+                     and not hdr_raw.get("Authorization"), url_raw))
+results.append(check("CONTENT_REFRESH_SECONDS=0 и отсутствие GITHUB_REPOSITORY "
+                     "выключают подгрузку",
+                     url_off == "" and hdr_off == {} and url_none == ""))
+for key, value in saved_env.items():
+    env(**{key: value})
+
+
+class RespGet:
+    def __init__(self, text, code):
+        self.text, self.status_code = text, code
+
+
+class Net:
+    """Замена requests.get: RequestException — тот же RuntimeError, что в FakeRequests."""
+    RequestException = RuntimeError
+
+    def __init__(self, resp=None, error=None):
+        self.resp, self.error = resp, error
+
+    def get(self, url, headers=None, timeout=None):
+        if self.error:
+            raise self.error("сеть легла")
+        return self.resp
+
+
+saved_requests = max_bot.requests
+max_bot.fetch_content = saved_fetch        # дальше проверяем саму функцию, не заглушку
+max_bot.requests = Net(RespGet("текст ответа", 200))
+got = max_bot.fetch_content("https://example/content.json", {})
+max_bot.requests = Net(RespGet('{"message": "Not Found"}', 404))
+miss = max_bot.fetch_content("https://example/content.json", {})
+max_bot.requests = Net(error=RuntimeError)
+down = max_bot.fetch_content("https://example/content.json", {})
+max_bot.requests = saved_requests
+results.append(check("fetch_content: 200 — текст, 404 и сетевой сбой — None",
+                     got == "текст ответа" and miss is None and down is None))
+
+max_bot.content_source, max_bot.fetch_content = saved_source, saved_fetch
+max_bot.CONTENT_REFRESH_SECONDS, max_bot.CONTENT_LIVE_FILE = saved_seconds, saved_live_file
+max_bot.CONTENT_WATCH = saved_watch
+content.CONTENT_FILE = saved_content_file
+content.reload()
+optimizer.refresh_catalog()
+results.append(check("после подгрузки возвращаемся к боевому файлу",
+                     content.text("intro") != LIVE_TEXT and content.warnings() == []))
+results.append(check("workflow даёт циклу токен на чтение и ручку частоты подгрузки",
+                     "CONTENT_REFRESH_SECONDS" in wf and "GITHUB_TOKEN" in wf
+                     and "try_refresh_content" in src_bot))
+results.append(check("цикл печатает, что подгрузка включена",
+                     "подгрузка контента" in src_bot))
 
 print(f"\n{sum(results)}/{len(results)} проверок пройдено")
 sys.exit(0 if all(results) else 1)
