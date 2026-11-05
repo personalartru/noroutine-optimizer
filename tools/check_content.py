@@ -25,6 +25,8 @@ import argparse
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -125,6 +127,63 @@ check("ни один рендер не пустой и без None", not empty, 
 check("подписи кнопок без HTML-разметки", not html_bad, "; ".join(html_bad[:3]))
 check("разметка <b>/<i> закрыта во всех текстах", not unbalanced,
       "; ".join(unbalanced[:3]))
+
+# ── 1b. Предпросмотр страницы = подстановка кода ──────────────────────────────
+# Админка рендерит {переменные} своим JavaScript (admin/render.js), бот — Python
+# из content.py. Разойдутся они незаметно: владелец в окне видит одно, человек в
+# чате — другое. Поэтому сравниваем две реализации напрямую, на боевом файле и
+# на нескольких ловушках: экранированные {{ }}, переменная, которой нет в коде,
+# и две подстановки в одной строке.
+JS_HARNESS = """
+const fs = require("fs");
+const job = JSON.parse(fs.readFileSync(0, "utf8"));
+const api = new Function(fs.readFileSync(job.file, "utf8") +
+  "\\nreturn {render: renderTemplate, names: varNames};")();
+process.stdout.write(JSON.stringify(job.samples.map(
+  ([tpl, values]) => [api.render(tpl, values), api.names(tpl)])));
+"""
+
+
+def js_render(samples):
+    """Результат render.js на тех же словарях, что отдаёт content.demo_values()."""
+    node = shutil.which("node")
+    if not node:
+        return None
+    job = {"file": os.path.join(ROOT, "admin", "render.js"), "samples": samples}
+    try:
+        done = subprocess.run([node, "-e", JS_HARNESS], input=json.dumps(job),
+                              capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if done.returncode != 0:
+        return {"error": done.stderr.strip()[:160]}
+    return json.loads(done.stdout)
+
+
+demo = content.demo_values()
+traps = ["{money}", "{{money}}", "{money} и {hours}", "{нет_такой}",
+         "Цена {money}/мес — {money} в месяц"]
+samples = [[tpl, demo] for tpl in traps]
+for step in raw.get("catalog", {}).get("checklist", []):
+    samples += [[step.get(key, ""), demo] for key in ("short", "body", "title")]
+for point in raw.get("catalog", {}).get("controls", []):
+    samples += [[point.get(key, ""), demo] for key in ("short", "check")]
+
+rendered = js_render(samples)
+if rendered is None:
+    print("::warning::нет node — предпросмотр админки с кодом не сверен")
+elif isinstance(rendered, dict):
+    check("предпросмотр админки рендерится", False, rendered["error"])
+else:
+    drift = []
+    for (tpl, _), (as_js, names_js) in zip(samples, rendered):
+        as_py = content.fill(tpl, demo)
+        if as_js != as_py:
+            drift.append(f"{tpl[:28]!r}: js {as_js[:38]!r} ≠ py {as_py[:38]!r}")
+        if names_js != content.BRACE_RE.findall(tpl):
+            drift.append(f"{tpl[:28]!r}: список переменных разошёлся")
+    check("предпросмотр страницы совпадает с подстановкой кода",
+          not drift, "; ".join(drift[:3]) or f"строк {len(samples)}")
 
 # Ключ, который код ни разу не подставляет, — это ловушка: админ видит поле в
 # файле, правит его, ждёт перемен в чате, а перемен не будет никогда. Такой ключ

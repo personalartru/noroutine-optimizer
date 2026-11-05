@@ -180,6 +180,7 @@ details.adv summary{cursor:pointer;color:var(--dim);font-size:12.5px}
   </div>
 </div>
 
+<script src="render.js"></script>
 <script>
 /* ── Состояние ─────────────────────────────────────────────────────────────── */
 const KEYS = {repo: "opt_repo", token: "opt_token", branch: "opt_branch",
@@ -280,12 +281,8 @@ function esc(s) {
 function allowedTags(s) {              /* после esc() возвращаем только <b> и <i> */
   return s.replace(/&lt;(\/?(?:b|i))&gt;/g, "<$1>");
 }
-function renderTemplate(tpl, withVars) {
-  const demo = S.schema?.demo || {};
-  return (tpl || "").replace(/\{([a-z_][a-z0-9_]*)(?![{])/g, (all, name) =>
-    withVars && withVars[name] !== undefined ? String(withVars[name])
-      : (demo[name] !== undefined ? String(demo[name]) : all));
-}
+/* renderTemplate и varNames — в render.js: их же проверяет tools/check_content.py,
+   сверяя предпросмотр страницы с подстановкой из content.py. */
 
 /* ── Валидация: те же правила, что у content.py ───────────────────────────── */
 function validate() {
@@ -301,7 +298,7 @@ function validate() {
         problems.push(`${path}: ключа нет в коде — правку никто не применит`);
         return;
       }
-      const used = [...value.matchAll(/\{([a-z_][a-z0-9_]*)(?![{])/g)].map(m => m[1]);
+      const used = varNames(value);
       const unknown = used.filter(v => !allowed.includes(v));
       if (unknown.length)
         problems.push(`${path}: переменные {${unknown.join("}, {")}} код не подставляет ` +
@@ -414,8 +411,7 @@ function validate() {
       if (!String(step[key] || "").trim()) problems.push(`${w}.${key}: пусто`);
     CHECKLIST_FIELDS.forEach(key => {
       const allowed = catalogVars("checklist");
-      const unknown = [...String(step[key] || "").matchAll(/\{([a-z_][a-z0-9_]*)(?![{])/g)]
-        .map(m => m[1]).filter(v => !allowed.includes(v));
+      const unknown = varNames(step[key]).filter(v => !allowed.includes(v));
       if (unknown.length)
         problems.push(`${w}.${key}: переменные {${unknown.join("}, {")}} не подставляются ` +
                       `в чек-листе (доступны: ${allowed.join(", ")})`);
@@ -427,8 +423,7 @@ function validate() {
       if (!String(point[key] || "").trim()) problems.push(`${w}.${key}: пусто`);
     CONTROL_FIELDS.forEach(key => {
       const allowed = catalogVars("controls");
-      const unknown = [...String(point[key] || "").matchAll(/\{([a-z_][a-z0-9_]*)(?![{])/g)]
-        .map(m => m[1]).filter(v => !allowed.includes(v));
+      const unknown = varNames(point[key]).filter(v => !allowed.includes(v));
       if (unknown.length)
         problems.push(`${w}.${key}: переменные {${unknown.join("}, {")}} не подставляются ` +
                       `в контрольных точках (доступны: ${allowed.join(", ")})`);
@@ -438,7 +433,7 @@ function validate() {
      точек: в остальном каталоге {something} уедет в сообщение как есть. */
   walkStrings(cat, "catalog", (path, value) => {
     if (/^catalog\.(checklist|controls)\.\d+\./.test(path)) return;
-    const braces = [...value.matchAll(/\{([a-z_][a-z0-9_]*)(?![{])/g)].map(m => m[1]);
+    const braces = varNames(value);
     if (braces.length)
       warnings.push(`${path}: {${braces.join("}, {")}} — подстановка работает ` +
                     "только в чек-листе и контрольных точках, здесь скобки видны читателю");
@@ -562,7 +557,7 @@ function varsFor(path) {
 }
 function fieldRow(path, value, opts = {}) {
   const vars = opts.chips === false ? [] : varsFor(path);
-  const used = [...String(value || "").matchAll(/\{([a-z_][a-z0-9_]*)(?![{])/g)].map(m => m[1]);
+  const used = varNames(value);
   const changed = JSON.stringify(pathGet(S.loaded, path)) !== JSON.stringify(value);
   const silent = matchesInternal(path);
   const demo = S.schema.demo;

@@ -201,8 +201,12 @@ git-контекста — везде передаём `--repo personalartru/nor
 ## Админка контента
 
 Страница `admin/index.html` правит тексты, подписи кнопок и каталог (сферы,
-специальности, рутины, инструменты, чек-лист, ставки) без пуша руками: она
-пишет `content.json` коммитом в `main` через GitHub Contents API.
+специальности, рутины, инструменты, чек-лист, точки контроля, ставки) без пуша
+руками: она пишет `content.json` коммитом в `main` через GitHub Contents API.
+Подстановка переменных для предпросмотра вынесена в `admin/render.js` — не для
+красоты, а потому что её сверяет `tools/check_content.py`: тот же набор строк
+прогоняется через JS и через `content.fill()`, и расхождение (лишняя `}`,
+подставленное вместо экранированной `{{`) ловится как упавшая проверка.
 
 Открыть: `https://personalartru.github.io/noroutine-optimizer/admin/`
 (нужен включённый Pages: Settings → Pages → Source = branch `main`, folder
@@ -281,7 +285,7 @@ MAX, с тем, что отрендерил код, и ловит склейку
 
 ```bash
 python3 tools/dump_content.py --check          # content.json и content.schema.json не отстали от кода
-python3 tools/check_content.py                 # 67 проверок оверлея: подстановки, служебные поля, мёртвые ключи, пустые строки вёрстки
+python3 tools/check_content.py                 # 68 проверок оверлея: подстановки (в том числе предпросмотр админки против кода), служебные поля, мёртвые ключи, пустые строки вёрстки
 python3 tools/simulate_optimizer.py --quiet    # 6 сценариев + инварианты клавиатур, optimizer-preview.html
 python3 tools/simulate_optimizer.py --overlay --quiet --no-preview   # правка из админки видна, цифры и payload'ы — нет
 python3 tools/check_max_bot.py                 # 91 интеграционная проверка с заглушкой MAX API: доставка, заявки, PDF и подгрузка контента
