@@ -230,8 +230,9 @@ def report_filename(data):
     """Имя файла по-человечески: optimizator-it-03-11-2026.pdf (id сферы, не кириллица)."""
     base = re.sub(r"[^a-z0-9]+", "-", str(data.get("slug") or "").lower()).strip("-")
     if not base:
+        # заголовка на верхнем уровне больше нет: он живёт в шапке отчёта
         base = re.sub(r"[^a-z0-9]+", "-",
-                      str(data.get("title", "")).lower()).strip("-")
+                      str((data.get("header") or {}).get("title", "")).lower()).strip("-")
     base = re.sub(r"-{2,}", "-", base)[:40] or "optimizator"
     date = re.sub(r"[^0-9]", "-", str(data.get("date", ""))).strip("-")
     return f"optimizator-{base}-{date}.pdf"

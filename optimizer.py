@@ -123,6 +123,11 @@ def round_to(number, step=1000):
     return int(round(number / step) * step)
 
 
+def money_range(low, high):
+    """Диапазон сумм одним знаком рубля: «200 000–500 000 ₽», а не два «₽» подряд."""
+    return f"{fmt(low)}–{fmt(high)} ₽"
+
+
 def sphere_by_id(sid):
     return next((s for s in SPHERES if s["id"] == sid), None)
 
@@ -516,12 +521,26 @@ def checklist_values(calc, sav):
     }
 
 
+def control_values(calc, sav):
+    """Подстановки каталога «Контроль окупаемости»: расчётная экономия в рублях."""
+    return {"money": money((sav or {}).get("saved_money") or 0)}
+
+
+def control_points(calc, sav):
+    """Точки контроля из каталога — тем же манером, что и шаги чек-листа."""
+    values = control_values(calc, sav)
+    return [{"point": content.fill(point.get("point"), values),
+             "when": content.fill(point.get("when"), values),
+             "short": content.fill(point.get("short"), values),
+             "check": content.fill(point.get("check"), values)}
+            for point in content.controls()]
+
+
 def checklist_steps(calc, sav):
     """Шаги внедрения из каталога — один источник для чата, PDF и текстового fallback.
 
-    `short` — одна строка в чате (с эмодзи и сроком), `body` — пояснение, которое
-    едет только в PDF: в сообщении оно раздувает финальный экран до трёх
-    простыней.
+    `short` — строка в чате, `body`/`result`/`owner` — три колонки таблицы 04 в PDF:
+    в сообщении они раздули бы финальный экран до трёх простыней.
     """
     values = checklist_values(calc, sav)
     steps = []
@@ -532,136 +551,264 @@ def checklist_steps(calc, sav):
             "short": content.fill(step.get("short"), values),
             "body": content.fill(step.get("body"), values),
             "when": content.fill(step.get("when"), values),
+            "result": content.fill(step.get("result"), values),
+            "owner": content.fill(step.get("owner"), values),
         })
     return steps
 
 
-def text_checklist(calc, sav):
-    """Чек-лист в чате: одна строка на шаг, подробности — в PDF."""
-    lines = [content.text("checklist.title"), ""]
-    for i, step in enumerate(checklist_steps(calc, sav), start=1):
-        lines.append(content.text("checklist.item", i=i, emoji=step["emoji"],
-                                  short=step["short"], when=step["when"]))
-    lines += ["", content.text("checklist.hint", pdf=content.label("final.pdf"))]
+# ── Финальный отчёт: пять блоков на один источник ─────────────────────────────
+# В чате короткая форма (text_brief), в PDF — таблицы (report_blocks через
+# report_data), а если файл в этом окружении не собрать — те же блоки
+# сообщением (report_text). Все три читают один report_numbers() и один
+# report_blocks(), поэтому цифра из чата не может разойтись с цифрой из файла:
+# расчёт живёт здесь, а не в двух вёрстках.
+
+BRIEF_OPS = 3    # сколько операций перечисляем в чате; остальные — «и ещё N»
+
+
+def payback_months(payback):
+    """«1,2» / «7» / «—» — одна формулировка окупаемости для всех носителей."""
+    if not payback:
+        return content.text("report.none")
+    return (f"{payback:.1f}".replace(".", ",").rstrip("0").rstrip(",")
+            if payback < 10 else str(int(round(payback))))
+
+
+def report_numbers(session, calc, sav):
+    """Отформатированные значения отчёта: числа считает код, подписи — в контенте."""
+    sav = sav or {}
+    calc = calc or {}
+    none = content.text("report.none")
+    people = max(1, int(calc.get("people") or 1))
+    tools = sav.get("tools") or []
+    out = {
+        "date": time.strftime("%d.%m.%Y"),
+        "status": content.text("report.status"),
+        "sphere": calc.get("sphere_label") or "",
+        "people": people,
+        "team": content.text("report.team_value", people=people_phrase(people),
+                             who=roles_summary(session) or none),
+        "rate": money(calc.get("rate", 0)),
+        "hours": fmt(calc.get("hours", 0)),
+        "money": money(calc.get("cost_month", 0)),
+        "tools": " + ".join(t["label"] for t in tools) or none,
+        "pct": int(round((sav.get("factor") or 0) * 100)),
+        "freed": fmt((sav.get("saved_hours") or 0) / people),
+        "saved_money": money(sav.get("saved_money", 0)),
+        "saved_year": money(sav.get("saved_year", 0)),
+        "budget": content.text("report.impl_value",
+                               range=money_range(sav.get("impl_low", 0),
+                                                 sav.get("impl_high", 0))),
+        "support": (content.text("report.support_value",
+                                 range=money_range(sav.get("support_low", 0),
+                                                   sav.get("support_high", 0)))
+                    if sav.get("support_high") else none),
+        "months": payback_months(sav.get("payback")),
+    }
+    return out
+
+
+def _brief_block(num, title_key):
+    """Заголовок блока в чате: «01 · Исходные данные», шаблон и подписи — в контенте."""
+    return content.text("brief.block", num=num, title=content.text(title_key))
+
+
+def text_brief(session, calc, sav):
+    """Короткая форма отчёта в чате: те же пять блоков, по 1–2 строки на блок."""
+    n = report_numbers(session, calc, sav)
+    ops = sorted(calc.get("ops") or [], key=lambda o: -o["hours"])
+    shown = ops[:BRIEF_OPS]
+    steps = checklist_steps(calc, sav)
+    points = control_points(calc, sav)
+    header = content.text("report.header_title")
+    lines = [
+        content.text("brief.title", header=header),
+        content.text("brief.meta", date=n["date"], sphere=esc(n["sphere"]),
+                     status=n["status"]),
+        _brief_block("01", "report.section_data"),
+        content.text("brief.data", team=n["team"], rate=n["rate"],
+                     hours=n["hours"], money=n["money"]),
+        content.text("brief.data_type", tools=n["tools"]),
+        _brief_block("02", "report.section_ops"),
+    ]
+    lines += [content.text("brief.ops_item", label=esc(op["label"]), hours=op["hours"])
+              for op in shown]
+    rest = len(ops) - len(shown)
+    if rest > 0:
+        lines.append(content.text("brief.ops_rest", rest=rest,
+                                  word=plural(rest, content.words("ops"))))
+    lines.append(content.text("brief.ops_total", hours=n["hours"]))
+    lines += [
+        _brief_block("03", "report.section_effect"),
+        content.text("brief.effect", pct=n["pct"],
+                     freed=content.text("report.freed_value", hours=n["freed"]),
+                     money=n["saved_money"], year=n["saved_year"]),
+        content.text("brief.effect_budget", budget=n["budget"], support=n["support"],
+                     months=n["months"]),
+        _brief_block("04", "report.section_checklist"),
+        content.text("brief.checklist_line",
+                     items=content.text("brief.checklist_join").join(
+                         content.text("brief.checklist_item", i=i, emoji=step["emoji"],
+                                      short=step["short"])
+                         for i, step in enumerate(steps, start=1))),
+        content.text("brief.checklist_hint"),
+        _brief_block("05", "report.section_control"),
+        content.text("brief.control_line",
+                     items=content.text("brief.control_join").join(
+                         content.text("brief.control_item", i=i, short=point["short"])
+                         for i, point in enumerate(points, start=1))),
+        content.text("brief.hint", pdf=content.label("final.pdf")),
+    ]
     return "\n".join(lines).rstrip()
 
 
-def checklist_full_text(calc, sav):
-    """Развёрнутый чек-лист сообщением: запасной путь, если PDF не собрался."""
-    lines = [content.text("checklist.full_title"), ""]
-    for i, step in enumerate(checklist_steps(calc, sav), start=1):
-        lines.append(content.text("checklist.full_item", i=i, title=step["title"],
-                                  body=step["body"], when=step["when"]) + "\n")
-    return "\n".join(lines).rstrip()
+def report_blocks(session, calc, sav):
+    """Пять блоков отчёта: строки «параметр — значение» и настоящие таблицы.
 
-
-def strip_html(text):
-    """Текст для PDF: разметка MAX в отчёте не нужна."""
-    plain = re.sub(r"</?(?:b|i|u|s|a|br)[^>]*>", "", str(text))
-    return html.unescape(plain).strip()
+    Здесь и формат (доли колонок, где жирная строка), и подстановки — всё, чего
+    не знает ни content.py, ни вёрстка. Отчёт читают два рендера: report_pdf.py
+    печатает файл, report_text() отдаёт то же сообщение, если файла нет.
+    """
+    n = report_numbers(session, calc, sav)
+    rep = content.text
+    ops = sorted(calc.get("ops") or [], key=lambda o: -o["hours"])
+    steps = checklist_steps(calc, sav)
+    points = control_points(calc, sav)
+    return [
+        {"num": "01", "title": rep("report.section_data"), "kind": "rows",
+         "rows": [
+             {"label": rep("report.row_team"), "value": n["team"]},
+             {"label": rep("report.row_rate"),
+              "value": rep("report.rate", rate=n["rate"])},
+             {"label": rep("report.row_hours"),
+              "value": rep("report.hours_value", hours=n["hours"])},
+             {"label": rep("report.row_money"),
+              "value": rep("report.month_value", money=n["money"])},
+             {"label": rep("report.row_type"),
+              "value": rep("report.type_value", tools=n["tools"])},
+         ]},
+        {"num": "02", "title": rep("report.section_ops"), "kind": "table",
+         "columns": [{"label": rep("report.col_num"), "width": 6, "align": "center"},
+                     {"label": rep("report.col_op"), "width": 32},
+                     {"label": rep("report.col_hours"), "width": 12, "align": "center"},
+                     {"label": rep("report.col_detail"), "width": 50}],
+         "rows": [[str(i), esc(op["label"]),
+                   rep("report.hours_short", hours=op["hours"]),
+                   esc(op.get("detail", ""))]
+                  for i, op in enumerate(ops, start=1)],
+         "empty": rep("report.empty_ops"),
+         "total": [None, rep("report.col_total"),
+                   rep("report.hours_short", hours=n["hours"]), None]},
+        {"num": "03", "title": rep("report.section_effect"), "kind": "rows",
+         "rows": [
+             {"label": rep("report.effect_take"),
+              "value": rep("report.percent_value", pct=n["pct"])},
+             {"label": rep("report.effect_freed"),
+              "value": rep("report.freed_value", hours=n["freed"])},
+             {"label": rep("report.effect_money"),
+              "value": rep("report.money_value", money=n["saved_money"],
+                           year=n["saved_year"])},
+             {"label": rep("report.budget_impl"), "value": n["budget"]},
+             {"label": rep("report.budget_support"), "value": n["support"]},
+             {"label": rep("report.figure_payback"),
+              "value": rep("report.payback_value", months=n["months"]),
+              "strong": True},
+         ],
+         "note": rep("report.effect_note")},
+        {"num": "04", "title": rep("report.section_checklist"), "kind": "table",
+         "columns": [{"label": rep("report.col_num"), "width": 5, "align": "center"},
+                     {"label": rep("report.col_step"), "width": 21},
+                     {"label": rep("report.col_do"), "width": 32},
+                     {"label": rep("report.col_result"), "width": 25},
+                     {"label": rep("report.col_owner"), "width": 17}],
+         "rows": [[str(i),
+                   rep("report.step_when", title=step["title"], when=step["when"]),
+                   step["body"], step["result"], step["owner"]]
+                  for i, step in enumerate(steps, start=1)],
+         "empty": rep("report.none"),
+         "note": rep("report.roles_note")},
+        {"num": "05", "title": rep("report.section_control"), "kind": "table",
+         "columns": [{"label": rep("report.col_point"), "width": 14},
+                     {"label": rep("report.col_when"), "width": 18},
+                     {"label": rep("report.col_check"), "width": 68}],
+         "rows": [[point["point"], point["when"], point["check"]]
+                  for point in points],
+         "empty": rep("report.none")},
+    ]
 
 
 def report_data(session, calc, sav):
-    """Структура для PDF-отчёта: всё уже отформатировано для человека.
+    """Структура для PDF: шапка, пять блоков и подвал.
 
-    Подписи разделов уезжают вместе с цифрами — report_pdf.py только рисует и
-    не держит ни одного текстового литерала, иначе правка админки дошла бы до
-    чата, но не до файла.
+    `slug` и `date` остаются на верхнем уровне: по ним транспорт называет файл
+    и по ним же фиксированная дата в заголовке PDF держит байты одинаковыми для
+    повторной загрузки в MAX.
     """
-    tools = sav.get("tools") or []
-    payback = sav.get("payback")
-    months = (f"{payback:.1f}".replace(".", ",").rstrip("0").rstrip(",")
-              if payback and payback < 10 else
-              (str(int(round(payback))) if payback else content.text("report.none")))
-    none = content.text("report.none")
-    date = time.strftime("%d.%m.%Y")
-    support = ""
-    if sav.get("support_high"):
-        support = content.text("report.support_value",
-                               low=money(sav["support_low"]),
-                               high=money(sav["support_high"]))
+    n = report_numbers(session, calc, sav)
     return {
-        "title": content.text("report.title",
-                              sphere=calc.get("sphere_label") or "").strip(),
         "slug": session.get("sphere") or "",
-        "date": date,
-        "who": roles_summary(session) or none,
-        "people": fmt(calc.get("people", 1)),
-        "rate": content.text("report.rate", rate=money(calc.get("rate", 0))),
-        "headline": content.text("report.headline", hours=fmt(calc.get("hours", 0)),
-                                 cost=money(calc.get("cost_month", 0))),
-        "ops": [{"title": op["label"],
-                 "value": content.text("report.hours_value", hours=op["hours"]),
-                 "note": op.get("detail", "")}
-                for op in sorted(calc.get("ops") or [], key=lambda o: -o["hours"])],
-        "figures": [
-            (content.text("report.figure_routine"),
-             content.text("report.hours_value", hours=fmt(calc.get("hours", 0)))),
-            (content.text("report.figure_take"),
-             content.text("report.percent_value",
-                          pct=int(round((sav.get("factor") or 0) * 100)))),
-            (content.text("report.figure_saving"),
-             content.text("report.hours_value", hours=fmt(sav.get("saved_hours", 0)))),
-            (content.text("report.figure_money"),
-             content.text("report.money_value", money=money(sav.get("saved_money", 0)),
-                          year=money(sav.get("saved_year", 0)))),
-            (content.text("report.figure_freed"),
-             content.text("report.hours_value",
-                          hours=fmt(sav.get("saved_hours", 0)
-                                    / max(1, calc.get("people", 1))))),
-            (content.text("report.figure_payback"),
-             content.text("report.payback_value", months=months)),
-        ],
-        "tools": [{"title": t["label"],
-                   "value": content.text("report.tool_value", low=money(t["impl"][0]),
-                                         high=money(t["impl"][1])),
-                   "note": t.get("what", "")}
-                  for t in tools],
-        "budget": [(content.text("report.budget_impl"),
-                    content.text("report.impl_value", low=money(sav.get("impl_low", 0)),
-                                 high=money(sav.get("impl_high", 0)))),
-                   (content.text("report.budget_support"), support or none)],
-        "steps": [dict(step, num=i) for i, step in enumerate(checklist_steps(calc, sav),
-                                                              start=1)],
-        "sections": {
-            "topline": content.text("report.topline", date=date),
-            "people_line": content.text("report.people_line",
-                                        people=fmt(calc.get("people", 1))),
-            "ops": content.text("report.section_ops"),
-            "saving": content.text("report.section_saving"),
-            "tools": content.text("report.section_tools"),
-            "checklist": content.text("report.section_checklist"),
-            "howto": content.text("report.section_howto"),
-            "empty_ops": content.text("report.empty_ops"),
-            "title_fallback": content.text("report.title_fallback"),
-            "channel_line": content.text("report.channel_line", channel=CHANNEL_URL),
+        "date": n["date"],
+        "header": {
+            "title": content.text("report.header_title"),
+            "subtitle": content.text("report.header_subtitle"),
+            "meta": content.text("report.header_meta", date=n["date"],
+                                 sphere=esc(n["sphere"]), status=n["status"]),
         },
-        "disclaimer": strip_html(content.text("rollout.disclaimer")),
-        "channel": CHANNEL_URL,
+        "block": content.text("report.block"),
+        "blocks": report_blocks(session, calc, sav),
+        "howto": {"title": content.text("report.howto"),
+                  "body": content.text("report.howto_body")},
+        "channel": {"url": CHANNEL_URL,
+                    "text": content.text("report.channel_line", channel=CHANNEL_URL)},
     }
 
 
+def report_text(session, calc, sav):
+    """Тот же отчёт сообщением: запасной путь, если PDF не собрался.
+
+    Рисует блоки из report_blocks() — файл и сообщение расходятся только
+    оформлением, но не содержимым.
+    """
+    n = report_numbers(session, calc, sav)
+    report = report_data(session, calc, sav)
+    lines = [content.text("brief.title", header=content.text("report.header_title")),
+             content.text("brief.meta", date=n["date"], sphere=esc(n["sphere"]),
+                          status=n["status"])]
+    for spec in report["blocks"]:
+        lines.append(content.text("fallback.block", num=spec["num"],
+                                  title=spec["title"]))
+        if spec["kind"] == "rows":
+            lines += [content.text("fallback.row", label=row["label"],
+                                   value=row["value"]) for row in spec["rows"]]
+        else:
+            join = content.text("fallback.cell_join")
+            lines += [content.text("fallback.cell",
+                                   cells=join.join(cell for cell in cells if cell))
+                      for cells in spec["rows"]]
+            if not spec["rows"]:
+                lines.append(spec["empty"])
+            if spec.get("total"):
+                lines.append(content.text("fallback.total", label=spec["total"][1],
+                                          value=spec["total"][2]))
+        if spec.get("note"):
+            lines.append(content.text("fallback.note", text=spec["note"]))
+    howto = report["howto"]
+    lines.append(content.text("fallback.howto", title=howto["title"],
+                              text=howto["body"]))
+    lines.append(content.text("fallback.channel", text=report["channel"]["text"]))
+    return "\n".join(lines).rstrip()
+
+
 def text_rollout(sav):
-    what = "\n".join(content.text("rollout.item", label=esc(t["label"]),
-                                  what=esc(t["what"]))
-                      for t in sav["tools"])
-    support = ""
-    if sav["support_high"]:
-        support = content.text("rollout.support", low=money(sav["support_low"]),
-                               high=money(sav["support_high"]))
-    payback = ""
-    if sav["payback"]:
-        months = sav["payback"]
-        pretty = (f"{months:.1f}".replace(".", ",").rstrip("0").rstrip(",")
-                  if months < 10 else str(int(round(months))))
-        payback = content.text("rollout.payback", months=pretty,
-                               money=money(sav["saved_money"]))
-    return [
-        content.text("rollout.head", what=what,
-                     budget=f"{money(sav['impl_low'])}–{money(sav['impl_high'])}",
-                     support=support, payback=payback),
-        content.text("rollout.disclaimer") + content.text("rollout.cta"),
-    ]
+    """Последнее сообщение экрана: честная оговорка и призыв отправить заявку.
+
+    Сама фраза живёт в texts.report.howto_body — тот же текст печатается в PDF,
+    поэтому правка в админке меняет и чат, и файл.
+    """
+    disclaimer = content.text("rollout.disclaimer",
+                              howto=content.text("report.howto_body"))
+    return [disclaimer + content.text("rollout.cta")]
 
 
 # ── Диспетчер кнопок ─────────────────────────────────────────────────────────
@@ -873,7 +1020,7 @@ def on_tool(session, arg):
     if arg == "plan":
         sav = session.get("sav") or compute_savings(session, calc)
         session["step"] = "rollout"
-        messages = emit(text_checklist(calc, sav))
+        messages = emit(text_brief(session, calc, sav))
         messages += emit(text_rollout(sav), keyboard_final())
         return session, messages
     if arg == "back":
@@ -900,7 +1047,7 @@ def on_pdf(session, _arg=None):
     """Кнопка «Полный отчёт (PDF)»: транспорт соберёт файл из `pdf`.
 
     Если генерация или загрузка не получится, транспорт отправит `pdf_fallback`
-    — развёрнутый чек-лист текстом, чтобы человек не остался ни с чем.
+    — тот же отчёт текстом (report_text), чтобы человек не остался ни с чем.
     """
     calc = session.get("calc") or {}
     sav = session.get("sav") or {}
@@ -910,7 +1057,7 @@ def on_pdf(session, _arg=None):
     return session, [{
         "text": content.text("pdf.preparing"),
         "pdf": data,
-        "pdf_fallback": checklist_full_text(calc, sav),
+        "pdf_fallback": report_text(session, calc, sav),
         "buttons": keyboard_final(),
     }]
 

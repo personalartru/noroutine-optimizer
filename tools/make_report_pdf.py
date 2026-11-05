@@ -57,8 +57,10 @@ def main():
         with open(path, "wb") as handle:
             handle.write(blob)
         pages = blob.count(b"/Type /Page") - blob.count(b"/Type /Pages")
+        title = (data.get("header") or {}).get("title", "")
+        blocks = len(data.get("blocks") or [])
         print(f"{path} · {len(blob)} байт · ~{max(pages, 1)} стр. · "
-              f"{data['title']}")
+              f"{title} · блоков {blocks}")
     return 0
 
 

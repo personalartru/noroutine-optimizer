@@ -410,10 +410,10 @@ function validate() {
   });
   cat.checklist.forEach((step, i) => {
     const w = `catalog.checklist[${i}]`;
-    for (const key of ["emoji", "title", "short", "body", "when"])
+    for (const key of CHECKLIST_FIELDS)
       if (!String(step[key] || "").trim()) problems.push(`${w}.${key}: пусто`);
     CHECKLIST_FIELDS.forEach(key => {
-      const allowed = catalogVars(key);
+      const allowed = catalogVars("checklist");
       const unknown = [...String(step[key] || "").matchAll(/\{([a-z_][a-z0-9_]*)(?![{])/g)]
         .map(m => m[1]).filter(v => !allowed.includes(v));
       if (unknown.length)
@@ -421,14 +421,27 @@ function validate() {
                       `в чек-листе (доступны: ${allowed.join(", ")})`);
     });
   });
-  /* Фигурные скобки код подставляет только в полях чек-листа: в остальном
-     каталоге {something} уедет в сообщение как есть. */
+  controlsList().forEach((point, i) => {
+    const w = `catalog.controls[${i}]`;
+    for (const key of CONTROL_FIELDS)
+      if (!String(point[key] || "").trim()) problems.push(`${w}.${key}: пусто`);
+    CONTROL_FIELDS.forEach(key => {
+      const allowed = catalogVars("controls");
+      const unknown = [...String(point[key] || "").matchAll(/\{([a-z_][a-z0-9_]*)(?![{])/g)]
+        .map(m => m[1]).filter(v => !allowed.includes(v));
+      if (unknown.length)
+        problems.push(`${w}.${key}: переменные {${unknown.join("}, {")}} не подставляются ` +
+                      `в контрольных точках (доступны: ${allowed.join(", ")})`);
+    });
+  });
+  /* Фигурные скобки код подставляет только в полях чек-листа и контрольных
+     точек: в остальном каталоге {something} уедет в сообщение как есть. */
   walkStrings(cat, "catalog", (path, value) => {
-    if (/^catalog\.checklist\.\d+\./.test(path)) return;
+    if (/^catalog\.(checklist|controls)\.\d+\./.test(path)) return;
     const braces = [...value.matchAll(/\{([a-z_][a-z0-9_]*)(?![{])/g)].map(m => m[1]);
     if (braces.length)
       warnings.push(`${path}: {${braces.join("}, {")}} — подстановка работает ` +
-                    "только в чек-листе, здесь скобки видны читателю");
+                    "только в чек-листе и контрольных точках, здесь скобки видны читателю");
   });
 
   const url = String(t.meta.channel_url || "");
@@ -438,13 +451,22 @@ function validate() {
   S.problems = problems; S.warnings = warnings;
   return problems.length === 0;
 }
-/* Подстановки чек-листа едины для всех полей и шагов: их набор — ключи
-   values, которые кладёт optimizer.checklist_values (справочник в schema). */
-const CHECKLIST_FIELDS = ["emoji", "title", "short", "body", "when"];
-function catalogVars(field) {
-  if (!CHECKLIST_FIELDS.includes(field)) return [];
-  return (S.schema.catalog_variables?.checklist ||
-          ["first", "first_hours", "second", "pilot", "tools"]).slice();
+/* Подстановки едины для всех полей одного списка: их набор — ключи, которые
+   код кладёт в values (optimizer.checklist_values / control_values, справочник
+   в schema.catalog_variables). */
+const CHECKLIST_FIELDS = ["emoji", "title", "short", "body", "when", "result", "owner"];
+const CONTROL_FIELDS = ["point", "when", "short", "check"];
+const CATALOG_FALLBACK = {checklist: ["first", "first_hours", "second", "pilot", "tools"],
+                          controls: ["money"]};
+function catalogVars(list) {
+  return (S.schema.catalog_variables?.[list] || CATALOG_FALLBACK[list] || []).slice();
+}
+/* Старый content.json мог не знать про контрольные точки: без этого списка
+   админка не показала бы правку, а бот молча взял бы каталог из кода. */
+function controlsList() {
+  if (!Array.isArray(S.draft.catalog.controls) || !S.draft.catalog.controls.length)
+    S.draft.catalog.controls = clone(S.schema.defaults?.catalog?.controls || []);
+  return S.draft.catalog.controls;
 }
 /* Виды payload'ов, которые знает dispatcher бота (optimizer.payload_kinds). */
 function kindMap() {
@@ -535,7 +557,7 @@ function titleOf(path) {
 function varsFor(path) {
   const fromSchema = S.schema.variables[path];
   if (fromSchema) return fromSchema.slice();
-  const m = /^catalog\.checklist\.\d+\.([a-z_]+)$/.exec(path);
+  const m = /^catalog\.(checklist|controls)\.\d+\.[a-z_]+$/.exec(path);
   return m ? catalogVars(m[1]) : [];
 }
 function fieldRow(path, value, opts = {}) {
@@ -640,6 +662,7 @@ function renderNav() {
   nav.insertAdjacentHTML("beforeend", "<b>Каталог</b>");
   [["spheres", "Сферы и специальности"], ["ops", "Рутина по сферам"],
    ["tools", "Инструменты и бюджеты"], ["checklist", "Чек-лист внедрения"],
+   ["controls", "Контроль окупаемости"],
    ["counts", "Кнопки количества"], ["meta", "Ссылка и служебное"]]
     .forEach(([id, text]) => label(id, text));
 }
@@ -838,9 +861,11 @@ function renderChecklist() {
   const card = document.createElement("div");
   card.className = "card";
   card.innerHTML = `<h2>Чек-лист внедрения</h2>
-    <p class="hint">В чате показывается короткая строка, в PDF и в заявке владельцу —
-    заголовок с пояснением. Переменные {first}, {second}, {pilot}, {tools} и
-    {first_hours} бот подставляет из реального расчёта пользователя.</p>`;
+    <p class="hint">Блок 04 отчёта. В чате — короткая строка (её видно в блоке 04
+    короткой формы), в PDF и в заявке владельцу — таблица из пяти колонок: шаг со
+    сроком, что делаем, результат и кто отвечает. Переменные {first}, {second},
+    {pilot}, {tools} и {first_hours} бот подставляет из реального расчёта
+    пользователя.</p>`;
   S.draft.catalog.checklist.forEach((step, i) => {
     /* Нумерацию ставит код (enumerate в optimizer/report_pdf), поля num в файле
        нет: запись сюда добавила бы в content.json ключ, которого код не читает. */
@@ -852,10 +877,14 @@ function renderChecklist() {
     textField(grid, "Эмодзи", step.emoji, v => { step.emoji = v; afterEdit(item); });
     textField(grid, "Срок", step.when, v => { step.when = v; afterEdit(item); });
     item.append(grid);
-    ["title", "short", "body"].forEach(key => {
+    ["title", "short", "body", "result", "owner"].forEach(key => {
       const row = fieldRow(`catalog.checklist.${i}.${key}`, step[key],
-                           {title: {title: "Заголовок (в PDF)", short: "Строка в чате",
-                                    body: "Пояснение (в PDF)"}[key], rows: key === "body" ? 3 : 1});
+                           {title: {title: "Заголовок (колонка «Шаг и срок»)",
+                                    short: "Строка в чате",
+                                    body: "Что делаем (в PDF)",
+                                    result: "Результат (в PDF)",
+                                    owner: "Кто отвечает (в PDF)"}[key],
+                           rows: key === "body" ? 3 : 1});
       item.append(row);
     });
     const del = document.createElement("button");
@@ -875,6 +904,54 @@ function renderChecklist() {
     add.textContent = "+ шаг после этого";
     add.addEventListener("click", () => {
       S.draft.catalog.checklist.splice(i + 1, 0, clone(step));
+      saveDraft(); render();
+    });
+    item.append(del, down, add);
+    card.append(item);
+  });
+  return card;
+}
+
+function renderControls() {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<h2>Контроль окупаемости</h2>
+    <p class="hint">Блок 05 отчёта: три точки, в которых сверяют обещанное с
+    фактом. В чате — одна строка на точку, в PDF — таблица «точка / когда /
+    что проверяем». Переменная {money} бот подставляет расчётную экономию в
+    рублях за месяц.</p>`;
+  controlsList().forEach((point, i) => {
+    const item = document.createElement("div");
+    item.className = "item";
+    item.innerHTML = `<h3>Точка ${i + 1} <span class="path">controls[${i}]</span></h3>`;
+    const grid = document.createElement("div");
+    grid.className = "grid";
+    textField(grid, "Название точки", point.point, v => { point.point = v; afterEdit(item); });
+    textField(grid, "Когда", point.when, v => { point.when = v; afterEdit(item); });
+    item.append(grid);
+    ["short", "check"].forEach(key => {
+      item.append(fieldRow(`catalog.controls.${i}.${key}`, point[key],
+                           {title: {short: "Строка в чате",
+                                   check: "Что проверяем (в PDF)"}[key],
+                            rows: key === "check" ? 3 : 1}));
+    });
+    const del = document.createElement("button");
+    del.textContent = "убрать точку";
+    del.addEventListener("click", () => {
+      if (!confirm("Убрать контрольную точку?")) return;
+      controlsList().splice(i, 1); saveDraft(); render();
+    });
+    const down = document.createElement("button");
+    down.textContent = "ниже";
+    down.addEventListener("click", () => {
+      const a = controlsList();
+      if (i + 1 < a.length) [a[i], a[i + 1]] = [a[i + 1], a[i]];
+      saveDraft(); render();
+    });
+    const add = document.createElement("button");
+    add.textContent = "+ точка после этого";
+    add.addEventListener("click", () => {
+      controlsList().splice(i + 1, 0, clone(point));
       saveDraft(); render();
     });
     item.append(del, down, add);
@@ -956,7 +1033,8 @@ function render() {
   if (box) box.remove();
   const groupsById = Object.fromEntries(S.schema.groups.map(g => [g.id, g]));
   const renderers = {spheres: renderSpheres, ops: renderOps, tools: renderTools,
-                     checklist: renderChecklist, counts: renderCounts, meta: renderMeta};
+                     checklist: renderChecklist, controls: renderControls,
+                     counts: renderCounts, meta: renderMeta};
   if (renderers[S.group]) main.append(renderers[S.group]());
   else if (groupsById[S.group]) main.append(renderGroupTexts(groupsById[S.group]));
   bindFieldEvents(main);

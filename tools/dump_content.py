@@ -46,6 +46,10 @@ UI_GROUPS = [
      "prefixes": ["texts.routine", "texts.savings"]},
     {"id": "tools", "title": "Шаг 3 — инструменты",
      "prefixes": ["texts.tools", "texts.fire", "buttons.tools", "buttons.marks"]},
+    {"id": "brief", "title": "Отчёт в чате (короткая форма)",
+     "prefixes": ["texts.brief"]},
+    {"id": "fallback", "title": "Отчёт без PDF (текстом в чате)",
+     "prefixes": ["texts.fallback"]},
     {"id": "checklist", "title": "Чек-лист внедрения",
      "prefixes": ["texts.checklist"]},
     {"id": "money", "title": "Стоимость, окупаемость, дисклеймер",
@@ -78,6 +82,10 @@ FIELD_LABELS = {
     "short": "Строка в чате",
     "body": "Пояснение",
     "when": "Срок",
+    "result": "Результат шага",
+    "owner": "Кто отвечает",
+    "point": "Название точки",
+    "check": "Что проверяем",
     "channel_url": "Ссылка на канал",
     "internal": "Служебное",
 }
@@ -173,10 +181,12 @@ def build_schema():
         "internal": content.internal_fields(),
         "demo": content.DEMO_VALUES,
         "variables": variables,
-        # Подстановки чек-листа едины для всех полей и всех шагов: их набор —
-        # ключи, которые код кладёт в values, а не догадка страницы.
+        # Подстановки каталога едины для всех его полей: их набор — ключи,
+        # которые код кладёт в values, а не догадка страницы. Чек-лист подставляет
+        # выбранные операции и инструменты, точка контроля — расчётную экономию.
         "catalog_variables": {
             "checklist": sorted(optimizer.checklist_values({"ops": []}, {})),
+            "controls": sorted(optimizer.control_values({}, {})),
         },
         # Виды payload'ов, которые dispatcher разбирает: страница сверяет подписи
         # кнопок количества с этим списком, а не с зашитым перечнем.

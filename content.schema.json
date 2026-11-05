@@ -6,6 +6,9 @@
       "pilot",
       "second",
       "tools"
+    ],
+    "controls": [
+      "money"
     ]
   },
   "defaults": {
@@ -54,8 +57,10 @@
     "catalog": {
       "checklist": [
         {
-          "body": "Опишите «{first}» по шагам: кто начинает, где живут данные, что значит «готово».",
+          "body": "Разбираем «{first}» по шагам: кто начинает, где живут данные, что значит «готово».",
           "emoji": "📝",
+          "owner": "Руководитель процесса*",
+          "result": "Схема процесса: шаги, участники, точки потерь",
           "short": "Зафиксировать процесс",
           "title": "Зафиксировать процесс как есть",
           "when": "0,5 дня"
@@ -63,6 +68,8 @@
         {
           "body": "Берём самое дорогое — «{first}» ({first_hours} ч/мес на человека): {pilot}. Остальное после первого результата.",
           "emoji": "🎯",
+          "owner": "Руководитель процесса*",
+          "result": "Один процесс с чёткими границами; остальное — после первого результата",
           "short": "Пилот: «{first}» ({first_hours} ч/мес)",
           "title": "Выбрать один пилот",
           "when": "1 неделя"
@@ -70,20 +77,26 @@
         {
           "body": "Регламенты, таблицы-источники, API-ключи и права, ответственный за исключения.",
           "emoji": "🔑",
+          "owner": "Ответственный за внедрение + IT",
+          "result": "Всё для сборки в одном месте + ответственный",
           "short": "Данные, доступы, права",
           "title": "Подготовить данные и доступы",
           "when": "2–3 дня"
         },
         {
-          "body": "Первая версия ({tools}) работает вместе с человеком: автомат делает, человек правит правила — так находятся крайние случаи.",
+          "body": "Первая версия ({tools}) работает вместе с человеком: автомат делает основную работу, человек контролирует и правит правила — так находятся крайние случаи.",
           "emoji": "🛠",
+          "owner": "Ответственный за внедрение",
+          "result": "Рабочая версия в реальном процессе — уже экономящая часы",
           "short": "MVP рядом с руками",
           "title": "Собрать MVP и гонять рядом с руками",
           "when": "1–2 недели"
         },
         {
-          "body": "Сколько уходило и сколько осталось. Только замер отличает «кажется, быстрее» от реальной экономии.",
+          "body": "Сравниваем, сколько времени уходило раньше и сколько осталось. Только замер отличает «кажется, быстрее» от реальной экономии.",
           "emoji": "📏",
+          "owner": "Ответственный за внедрение",
+          "result": "Конкретные цифры экономии в часах и рублях",
           "short": "Замер до и после",
           "title": "Замерить часы до и после",
           "when": "2 недели"
@@ -91,6 +104,8 @@
         {
           "body": "Кто правит сценарии, куда писать при сбое, как добавить операцию.",
           "emoji": "🧭",
+          "owner": "Владелец процесса*",
+          "result": "Система с хозяином и инструкцией",
           "short": "Ответственный и инструкция",
           "title": "Передать владельцу и задокументировать",
           "when": "1 день"
@@ -98,9 +113,31 @@
         {
           "body": "По «{first}» есть цифра — добавляем «{second}» и остальное из расчёта: они встают на готовый контур дешевле.",
           "emoji": "📈",
+          "owner": "Руководитель процесса*",
+          "result": "Конвейер: новые процессы встают быстрее и дешевле первого",
           "short": "Тираж: «{second}» и остальное",
-          "title": "Тиражировать",
+          "title": "Масштабировать",
           "when": "1–2 недели на операцию"
+        }
+      ],
+      "controls": [
+        {
+          "check": "MVP работает, часы на пилотную операцию снизились, правила скорректированы",
+          "point": "Точка 1",
+          "short": "М1–2 · MVP работает, часы вниз",
+          "when": "Месяц 1–2"
+        },
+        {
+          "check": "Замер подтверждает экономию по пилоту, запущено масштабирование",
+          "point": "Точка 2",
+          "short": "М3–4 · замер и масштаб",
+          "when": "Месяц 3–4"
+        },
+        {
+          "check": "Факт сопоставлен с расчётными {money}/мес; решение о расширении контура",
+          "point": "Точка 3",
+          "short": "М6–7 · факт против {money}/мес",
+          "when": "Месяц 6–7"
         }
       ],
       "count_buttons": [
@@ -696,17 +733,32 @@
       "channel_url": "https://max.ru/channel_noroutine"
     },
     "texts": {
+      "brief": {
+        "block": "\n<b>{num} · {title}</b>",
+        "checklist_hint": "Полные шаги с результатом и ответственным — в отчёте.",
+        "checklist_item": "{i}.{emoji} {short}",
+        "checklist_join": " → ",
+        "checklist_line": "{items}",
+        "control_item": "{i}. {short}",
+        "control_join": " · ",
+        "control_line": "{items}",
+        "data": "👥 {team} · 💴 {rate}/ч\n🕐 {hours} ч/мес рутины = {money}/мес",
+        "data_type": "🧩 {tools}",
+        "effect": "🤖 Под автоматизацию {pct}% · освобождается {freed}\n💰 {money}/мес · {year}/год",
+        "effect_budget": "🏗 {budget} · 🧾 {support}\n⏱ Окупаемость: <b>~{months} мес</b>",
+        "hint": "\n📎 Полный отчёт с таблицами — кнопкой «{pdf}» ниже.",
+        "meta": "🗓 {date} · {sphere} · статус: {status}",
+        "ops_item": "• {label} — {hours} ч",
+        "ops_rest": "• и ещё {rest} {word} — в отчёте",
+        "ops_total": "Σ Итого: {hours} ч/мес",
+        "title": "\n📄 <b>{header}</b>"
+      },
       "cancel": "Оптимизатор остановил. Продолжить — «Начать заново» или /старт.",
       "checklist": {
         "fallback_first": "повторяющаяся операция",
         "fallback_pilot": "переводим шаг в сценарий",
         "fallback_second": "соседние операции",
-        "fallback_tools": "связки",
-        "full_item": "<b>{i}. {title}</b> — {body}\n   <i>{when}</i>",
-        "full_title": "<b>Чек-лист внедрения — подробно</b>",
-        "hint": "Пояснения к каждому шагу, расчёт и бюджет — кнопкой «{pdf}» ниже.",
-        "item": "{i}. {emoji} {short} — <i>{when}</i>",
-        "title": "<b>Чек-лист внедрения</b>"
+        "fallback_tools": "связки"
       },
       "count": {
         "ask": "Сколько человек в роли «{role}»? Напишите число, например 7.",
@@ -724,6 +776,16 @@
         "no_sphere": "Такой сферы нет в списке — выберите из кнопок.",
         "no_tool_pick": "Выберите инструмент 🙂 «Уволить всех» тоже считается.",
         "sphere_first": "Сначала выберите сферу — кнопки выше."
+      },
+      "fallback": {
+        "block": "\n<b>{num} · {title}</b>",
+        "cell": "{cells}",
+        "cell_join": " — ",
+        "channel": "\n{text}",
+        "howto": "\n<b>{title}</b>\n{text}",
+        "note": "\n<i>{text}</i>",
+        "row": "• {label}: {value}",
+        "total": "Σ {label}: <b>{value}</b>"
       },
       "feedback": {
         "done": "Отправил в штаб оптимизации вместе с вашим расчётом — обычно отвечаем в течение дня.\n\nПересчитать другой процесс — «Оптимизатор заново» ниже.",
@@ -749,35 +811,59 @@
       },
       "people_phrase": "{count} {word}",
       "report": {
+        "block": "{num} · {title}",
         "budget_impl": "Бюджет внедрения",
         "budget_support": "Сопровождение",
-        "channel_line": "Разборы и готовые связки: {channel}",
+        "channel_line": "Автоматизация рабочих процессов: обзоры инструментов и реальные кейсы — {channel}",
+        "col_check": "Что проверяем",
+        "col_detail": "Что входит",
+        "col_do": "Что делаем",
+        "col_hours": "Часы в месяц",
+        "col_num": "№",
+        "col_op": "Операция",
+        "col_owner": "Кто отвечает",
+        "col_point": "Точка",
+        "col_result": "Результат",
+        "col_step": "Шаг и срок",
+        "col_total": "Итого",
+        "col_when": "Когда",
+        "effect_freed": "Освобождается",
+        "effect_money": "Экономия в деньгах",
+        "effect_note": "Человек остаётся только на исключениях: нестандартные случаи, спорные ситуации и контроль качества.",
+        "effect_take": "Рутина под автоматизацию",
         "empty_ops": "Операции не выбраны.",
-        "figure_freed": "Освобождается на человека",
-        "figure_money": "В деньгах",
         "figure_payback": "Окупаемость",
-        "figure_routine": "Рутина сейчас",
-        "figure_saving": "Экономия",
-        "figure_take": "Забираем автоматизацией",
-        "headline": "{hours} ч/мес рутины · {cost}/мес",
+        "freed_value": "{hours} ч/мес на человека",
+        "header_meta": "Дата: {date} · Проект: {sphere} · Статус: {status}",
+        "header_subtitle": "Оптимизатор — бот, который помогает оптимизировать ваши рабочие процессы.",
+        "header_title": "Отчёт внедрения автоматизации · Пилот",
+        "hours_short": "{hours} ч",
         "hours_value": "{hours} ч/мес",
-        "impl_value": "{low}–{high} разово",
+        "howto": "Как читать цифры",
+        "howto_body": "Расчёт ориентировочный: часы и ставки — из ваших ответов и средних по рынку, бюджет — типовой диапазон. Не оферта и не гарантия экономии; точная оценка — после разбора процесса.",
+        "impl_value": "{range} разово",
         "money_value": "{money}/мес · {year}/год",
+        "month_value": "{money}/мес",
         "none": "—",
         "payback_value": "~{months} мес",
-        "people_line": "{people} чел",
         "percent_value": "{pct}%",
         "rate": "{rate}/ч",
+        "roles_note": "* При команде из одного человека руководитель и исполнитель совпадают — роли зафиксированы на бумаге, чтобы процесс не зависел от одного человека.",
+        "row_hours": "Рутина сейчас",
+        "row_money": "В деньгах",
+        "row_rate": "Ставка",
+        "row_team": "Команда",
+        "row_type": "Тип автоматизации",
         "section_checklist": "Чек-лист внедрения",
-        "section_howto": "Как читать цифры",
+        "section_control": "Контроль окупаемости",
+        "section_data": "Исходные данные",
+        "section_effect": "Ожидаемый эффект",
         "section_ops": "Рутина по операциям",
-        "section_saving": "Экономия",
-        "section_tools": "Инструменты и бюджет",
-        "support_value": "{low}–{high}/мес",
-        "title": "Отчёт оптимизатора · {sphere}",
-        "title_fallback": "Отчёт оптимизатора",
-        "tool_value": "{low}–{high} разово",
-        "topline": "{date} · расчёт «Оптимизатора»"
+        "status": "пилот",
+        "step_when": "{title} · {when}",
+        "support_value": "{range}/мес",
+        "team_value": "{people} — {who}",
+        "type_value": "{tools}"
       },
       "roles": {
         "hint": "Можно несколько галочек — потом спрошу, сколько человек в каждой роли.",
@@ -786,11 +872,7 @@
       },
       "rollout": {
         "cta": "\n\nХотите конкретный план под ваш процесс — отправьте заявку кнопкой ниже.",
-        "disclaimer": "<b>Дисклеймер.</b> Расчёт ориентировочный: часы и ставки — из ваших ответов и средних по рынку, бюджет — типовой диапазон. Не оферта и не гарантия экономии; точная оценка — после разбора процесса.",
-        "head": "<b>Стоимость внедрения</b>\n\n{what}\n\n<b>Примерный бюджет:</b> {budget} разово.{support}{payback}",
-        "item": "• <b>{label}</b>: {what}",
-        "payback": "\nСредний бюджет окупается за <b>~{months} мес</b> при экономии {money}/мес.",
-        "support": "\n<b>Сопровождение:</b> {low}–{high}/мес."
+        "disclaimer": "<b>Дисклеймер.</b> {howto}"
       },
       "routine": {
         "figures": "<b>Часы рутины:</b> {hours} ч/мес на {people} · {hours_year} ч/год\n<b>Стоимость:</b> ~<b>{cost_month}/мес</b> по ставке {rate}/ч · {cost_year} в год",
@@ -839,7 +921,8 @@
   "demo": {
     "after": 391,
     "body": "Берём самое дорогое",
-    "budget": "100 000–270 000 ₽",
+    "budget": "456 000–1 170 000 ₽ разово",
+    "cells": "Заполнение карточек — 22 ч",
     "channel": "https://max.ru/channel_noroutine",
     "cost": "383 726 ₽",
     "cost_month": "383 726 ₽",
@@ -853,12 +936,13 @@
     "freed": "366 ч/мес",
     "freed_pct": 229,
     "further": " Дальше ещё 1 роль.",
-    "high": "270 000 ₽",
+    "header": "Отчёт внедрения автоматизации · Пилот",
     "hours": 22,
     "hours_year": "24 960",
+    "howto": "Расчёт ориентировочный: часы и ставки — из ваших ответов и средних по рынку, бюджет — типовой диапазон.",
     "i": 1,
-    "label": "Запись и переносы клиентов",
-    "low": "100 000 ₽",
+    "items": "1.📝 процесс → 2.🎯 пилот",
+    "label": "Ставка",
     "mark": "▫️",
     "money": "249 423 ₽",
     "money_month": "249 423 ₽",
@@ -866,7 +950,9 @@
     "months": "1,2",
     "n": 1,
     "names": "Чат-бот, n8n-воркфлоу",
+    "num": "01",
     "ops": "• …",
+    "owner": "Руководитель процесса*",
     "payback": "",
     "pct": 65,
     "pdf": "📄 Полный отчёт (PDF)",
@@ -874,7 +960,10 @@
     "per_person": 52,
     "picked": "Администратор",
     "pilot": "перевести частые вопросы на бота",
+    "range": "456 000–1 170 000 ₽",
     "rate": "340 ₽",
+    "rest": 3,
+    "result": "Один процесс с чёткими границами",
     "role": "Администратор",
     "roles": "Администратор × 2",
     "saved": 732,
@@ -883,9 +972,13 @@
     "share": 33,
     "short": "Пилот: «Запись» (22 ч/мес)",
     "sphere": "Услуги / бьюти",
-    "support": "",
+    "status": "пилот",
+    "support": "38 000–77 000 ₽/мес",
+    "team": "1 человек — «вы один, всё на вас»",
+    "text": "Человек остаётся только на исключениях.",
     "title": "Выбрать один пилот",
     "tools": "чат-бот, n8n-воркфлоу",
+    "value": "750 ₽/ч",
     "what": "бот закрывает обращения",
     "when": "1 неделя",
     "who": "Администратор × 2",
@@ -896,6 +989,7 @@
     "blurb": "Описание сферы",
     "body": "Пояснение",
     "channel_url": "Ссылка на канал",
+    "check": "Что проверяем",
     "detail": "Как это выглядит руками",
     "emoji": "Эмодзи",
     "factor": "Какую часть забирает автоматизация (0…1)",
@@ -904,7 +998,10 @@
     "impl": "Бюджет внедрения, ₽ [от, до]",
     "internal": "Служебное",
     "label": "Название",
+    "owner": "Кто отвечает",
     "pilot": "С чего начать",
+    "point": "Название точки",
+    "result": "Результат шага",
     "salary": "Зарплата в месяц, ₽",
     "short": "Строка в чате",
     "support": "Поддержка в месяц, ₽ [от, до]",
@@ -913,8 +1010,10 @@
     "when": "Срок"
   },
   "group_titles": {
+    "brief": "Отчёт в чате (короткая форма)",
     "checklist": "Чек-лист внедрения",
     "errors": "Ошибки и подсказки",
+    "fallback": "Отчёт без PDF (текстом в чате)",
     "greeting": "Приветствие и выбор режима",
     "lead": "Заявка и финальные кнопки",
     "money": "Стоимость, окупаемость, дисклеймер",
@@ -1013,13 +1112,46 @@
       "title": "Шаг 3 — инструменты"
     },
     {
+      "id": "brief",
+      "paths": [
+        "texts.brief.title",
+        "texts.brief.meta",
+        "texts.brief.block",
+        "texts.brief.data",
+        "texts.brief.data_type",
+        "texts.brief.ops_item",
+        "texts.brief.ops_rest",
+        "texts.brief.ops_total",
+        "texts.brief.effect",
+        "texts.brief.effect_budget",
+        "texts.brief.checklist_item",
+        "texts.brief.checklist_join",
+        "texts.brief.checklist_line",
+        "texts.brief.checklist_hint",
+        "texts.brief.control_item",
+        "texts.brief.control_join",
+        "texts.brief.control_line",
+        "texts.brief.hint"
+      ],
+      "title": "Отчёт в чате (короткая форма)"
+    },
+    {
+      "id": "fallback",
+      "paths": [
+        "texts.fallback.block",
+        "texts.fallback.row",
+        "texts.fallback.cell",
+        "texts.fallback.cell_join",
+        "texts.fallback.total",
+        "texts.fallback.note",
+        "texts.fallback.howto",
+        "texts.fallback.channel"
+      ],
+      "title": "Отчёт без PDF (текстом в чате)"
+    },
+    {
       "id": "checklist",
       "paths": [
-        "texts.checklist.title",
-        "texts.checklist.item",
-        "texts.checklist.hint",
-        "texts.checklist.full_title",
-        "texts.checklist.full_item",
         "texts.checklist.fallback_first",
         "texts.checklist.fallback_second",
         "texts.checklist.fallback_pilot",
@@ -1030,10 +1162,6 @@
     {
       "id": "money",
       "paths": [
-        "texts.rollout.head",
-        "texts.rollout.item",
-        "texts.rollout.support",
-        "texts.rollout.payback",
         "texts.rollout.disclaimer",
         "texts.rollout.cta"
       ],
@@ -1042,34 +1170,58 @@
     {
       "id": "report",
       "paths": [
-        "texts.report.title",
-        "texts.report.title_fallback",
-        "texts.report.topline",
-        "texts.report.people_line",
-        "texts.report.headline",
+        "texts.report.header_title",
+        "texts.report.header_subtitle",
+        "texts.report.header_meta",
+        "texts.report.status",
+        "texts.report.block",
+        "texts.report.none",
         "texts.report.rate",
         "texts.report.hours_value",
+        "texts.report.hours_short",
         "texts.report.percent_value",
+        "texts.report.month_value",
         "texts.report.money_value",
-        "texts.report.tool_value",
         "texts.report.impl_value",
         "texts.report.support_value",
         "texts.report.payback_value",
-        "texts.report.none",
-        "texts.report.figure_routine",
-        "texts.report.figure_take",
-        "texts.report.figure_saving",
-        "texts.report.figure_money",
-        "texts.report.figure_freed",
-        "texts.report.figure_payback",
+        "texts.report.section_data",
+        "texts.report.row_team",
+        "texts.report.row_rate",
+        "texts.report.row_hours",
+        "texts.report.row_money",
+        "texts.report.row_type",
+        "texts.report.team_value",
+        "texts.report.type_value",
+        "texts.report.section_ops",
+        "texts.report.col_num",
+        "texts.report.col_op",
+        "texts.report.col_hours",
+        "texts.report.col_detail",
+        "texts.report.col_total",
+        "texts.report.empty_ops",
+        "texts.report.section_effect",
+        "texts.report.effect_take",
+        "texts.report.effect_freed",
+        "texts.report.freed_value",
+        "texts.report.effect_money",
         "texts.report.budget_impl",
         "texts.report.budget_support",
-        "texts.report.section_ops",
-        "texts.report.section_saving",
-        "texts.report.section_tools",
+        "texts.report.figure_payback",
+        "texts.report.effect_note",
         "texts.report.section_checklist",
-        "texts.report.section_howto",
-        "texts.report.empty_ops",
+        "texts.report.col_step",
+        "texts.report.col_do",
+        "texts.report.col_result",
+        "texts.report.col_owner",
+        "texts.report.step_when",
+        "texts.report.roles_note",
+        "texts.report.section_control",
+        "texts.report.col_point",
+        "texts.report.col_when",
+        "texts.report.col_check",
+        "texts.report.howto",
+        "texts.report.howto_body",
         "texts.report.channel_line"
       ],
       "title": "Отчёт (PDF и заявка владельцу)"
@@ -1119,7 +1271,8 @@
   ],
   "internal": [
     "catalog.self_role.label",
-    "catalog.spheres[].blurb"
+    "catalog.spheres[].blurb",
+    "catalog.tools[].what"
   ],
   "limits": {
     "button_label": 64,
@@ -1181,28 +1334,75 @@
     ],
     "buttons.tools.ok": [],
     "buttons.tools.plan": [],
+    "texts.brief.block": [
+      "num",
+      "title"
+    ],
+    "texts.brief.checklist_hint": [],
+    "texts.brief.checklist_item": [
+      "emoji",
+      "i",
+      "short"
+    ],
+    "texts.brief.checklist_join": [],
+    "texts.brief.checklist_line": [
+      "items"
+    ],
+    "texts.brief.control_item": [
+      "i",
+      "short"
+    ],
+    "texts.brief.control_join": [],
+    "texts.brief.control_line": [
+      "items"
+    ],
+    "texts.brief.data": [
+      "hours",
+      "money",
+      "rate",
+      "team"
+    ],
+    "texts.brief.data_type": [
+      "tools"
+    ],
+    "texts.brief.effect": [
+      "freed",
+      "money",
+      "pct",
+      "year"
+    ],
+    "texts.brief.effect_budget": [
+      "budget",
+      "months",
+      "support"
+    ],
+    "texts.brief.hint": [
+      "pdf"
+    ],
+    "texts.brief.meta": [
+      "date",
+      "sphere",
+      "status"
+    ],
+    "texts.brief.ops_item": [
+      "hours",
+      "label"
+    ],
+    "texts.brief.ops_rest": [
+      "rest",
+      "word"
+    ],
+    "texts.brief.ops_total": [
+      "hours"
+    ],
+    "texts.brief.title": [
+      "header"
+    ],
     "texts.cancel": [],
     "texts.checklist.fallback_first": [],
     "texts.checklist.fallback_pilot": [],
     "texts.checklist.fallback_second": [],
     "texts.checklist.fallback_tools": [],
-    "texts.checklist.full_item": [
-      "body",
-      "i",
-      "title",
-      "when"
-    ],
-    "texts.checklist.full_title": [],
-    "texts.checklist.hint": [
-      "pdf"
-    ],
-    "texts.checklist.item": [
-      "emoji",
-      "i",
-      "short",
-      "when"
-    ],
-    "texts.checklist.title": [],
     "texts.count.ask": [
       "role"
     ],
@@ -1225,6 +1425,32 @@
     "texts.errors.no_sphere": [],
     "texts.errors.no_tool_pick": [],
     "texts.errors.sphere_first": [],
+    "texts.fallback.block": [
+      "num",
+      "title"
+    ],
+    "texts.fallback.cell": [
+      "cells"
+    ],
+    "texts.fallback.cell_join": [],
+    "texts.fallback.channel": [
+      "text"
+    ],
+    "texts.fallback.howto": [
+      "text",
+      "title"
+    ],
+    "texts.fallback.note": [
+      "text"
+    ],
+    "texts.fallback.row": [
+      "label",
+      "value"
+    ],
+    "texts.fallback.total": [
+      "label",
+      "value"
+    ],
     "texts.feedback.done": [],
     "texts.feedback.draft": [
       "cost",
@@ -1259,39 +1485,64 @@
       "count",
       "word"
     ],
+    "texts.report.block": [
+      "num",
+      "title"
+    ],
     "texts.report.budget_impl": [],
     "texts.report.budget_support": [],
     "texts.report.channel_line": [
       "channel"
     ],
+    "texts.report.col_check": [],
+    "texts.report.col_detail": [],
+    "texts.report.col_do": [],
+    "texts.report.col_hours": [],
+    "texts.report.col_num": [],
+    "texts.report.col_op": [],
+    "texts.report.col_owner": [],
+    "texts.report.col_point": [],
+    "texts.report.col_result": [],
+    "texts.report.col_step": [],
+    "texts.report.col_total": [],
+    "texts.report.col_when": [],
+    "texts.report.effect_freed": [],
+    "texts.report.effect_money": [],
+    "texts.report.effect_note": [],
+    "texts.report.effect_take": [],
     "texts.report.empty_ops": [],
-    "texts.report.figure_freed": [],
-    "texts.report.figure_money": [],
     "texts.report.figure_payback": [],
-    "texts.report.figure_routine": [],
-    "texts.report.figure_saving": [],
-    "texts.report.figure_take": [],
-    "texts.report.headline": [
-      "cost",
+    "texts.report.freed_value": [
+      "hours"
+    ],
+    "texts.report.header_meta": [
+      "date",
+      "sphere",
+      "status"
+    ],
+    "texts.report.header_subtitle": [],
+    "texts.report.header_title": [],
+    "texts.report.hours_short": [
       "hours"
     ],
     "texts.report.hours_value": [
       "hours"
     ],
+    "texts.report.howto": [],
+    "texts.report.howto_body": [],
     "texts.report.impl_value": [
-      "high",
-      "low"
+      "range"
     ],
     "texts.report.money_value": [
       "money",
       "year"
     ],
+    "texts.report.month_value": [
+      "money"
+    ],
     "texts.report.none": [],
     "texts.report.payback_value": [
       "months"
-    ],
-    "texts.report.people_line": [
-      "people"
     ],
     "texts.report.percent_value": [
       "pct"
@@ -1299,25 +1550,31 @@
     "texts.report.rate": [
       "rate"
     ],
+    "texts.report.roles_note": [],
+    "texts.report.row_hours": [],
+    "texts.report.row_money": [],
+    "texts.report.row_rate": [],
+    "texts.report.row_team": [],
+    "texts.report.row_type": [],
     "texts.report.section_checklist": [],
-    "texts.report.section_howto": [],
+    "texts.report.section_control": [],
+    "texts.report.section_data": [],
+    "texts.report.section_effect": [],
     "texts.report.section_ops": [],
-    "texts.report.section_saving": [],
-    "texts.report.section_tools": [],
+    "texts.report.status": [],
+    "texts.report.step_when": [
+      "title",
+      "when"
+    ],
     "texts.report.support_value": [
-      "high",
-      "low"
+      "range"
     ],
-    "texts.report.title": [
-      "sphere"
+    "texts.report.team_value": [
+      "people",
+      "who"
     ],
-    "texts.report.title_fallback": [],
-    "texts.report.tool_value": [
-      "high",
-      "low"
-    ],
-    "texts.report.topline": [
-      "date"
+    "texts.report.type_value": [
+      "tools"
     ],
     "texts.roles.hint": [],
     "texts.roles.picked": [
@@ -1325,24 +1582,8 @@
     ],
     "texts.roles.title": [],
     "texts.rollout.cta": [],
-    "texts.rollout.disclaimer": [],
-    "texts.rollout.head": [
-      "budget",
-      "payback",
-      "support",
-      "what"
-    ],
-    "texts.rollout.item": [
-      "label",
-      "what"
-    ],
-    "texts.rollout.payback": [
-      "money",
-      "months"
-    ],
-    "texts.rollout.support": [
-      "high",
-      "low"
+    "texts.rollout.disclaimer": [
+      "howto"
     ],
     "texts.routine.figures": [
       "cost_month",

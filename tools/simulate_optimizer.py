@@ -323,12 +323,12 @@ def admin_overlay():
     """content.json таким, каким его отдаёт админка после правки формулировок.
 
     Правим по одному полю каждого сорта — текст, подпись кнопки, сфера, роль,
-    операция, инструмент, шаг чек-листа — и проверяем две стороны одной медали.
-    Поля из `shown` обязаны появиться в диалоге или в отчёте: если не появились,
-    админка дарит владельцу редактор для строки, которую бот не показывает. Поля
-    из `silent` обязаны НЕ появляться: они лежат в content.json как справочник
-    расчёта, и мету их держит meta.internal — админка гасит такие поля и пишет,
-    что на сообщения они не влияют.
+    операция, инструмент, шаг чек-листа, точка контроля — и проверяем две стороны
+    одной медали. Поля из `shown` обязаны появиться в диалоге или в отчёте: если не
+    появились, админка дарит владельцу редактор для строки, которую бот не
+    показывает. Поля из `silent` обязаны НЕ появляться: они лежат в content.json
+    как справочник расчёта, и мету их держит meta.internal — админка гасит такие
+    поля и пишет, что на сообщения они не влияют.
 
     Берём те сферы, роли и инструменты, по которым сценарии действительно
     кликают, иначе «правка не появилась» означала бы лишь то, что сценарий туда
@@ -343,19 +343,35 @@ def admin_overlay():
     def sphere_of(sid):
         return next(s for s in cat["spheres"] if s["id"] == sid)
 
-    def edit_text(path, value, note):
+    def edit_text(path, value, note, probe=None):
+        """Правка текста; `probe` — чем сверять.
+
+        В шаблоне с подстановками ({hours}, {pdf}, {money}) в сообщении стоят
+        числа, а не сами скобки, поэтому искать строку целиком нельзя: probe
+        задаёт неизменный кусок шаблона вокруг подстановки.
+        """
         node = tree["texts"]
         for key in path.split(".")[:-1]:
             node = node[key]
         node[path.split(".")[-1]] = value
-        shown[note] = value
+        shown[note] = value if probe is None else probe
 
     edit_text("intro", f"{ADMIN_MARK}: шесть вопросов — и расчёт готов.",
               "текст шага 1")
     edit_text("stale", f"{ADMIN_MARK}: кнопка из прошлого расчёта.",
               "реплика про просроченный шаг")
-    edit_text("checklist.title", f"<b>{ADMIN_MARK}: порядок внедрения</b>",
-              "заголовок чек-листа")
+    # Отчёт: короткая форма в чате, заголовки блоков (они общие для чата и PDF)
+    # и строка, которую видно только в файле — сверяем оба носителя.
+    edit_text("report.section_control", f"{ADMIN_MARK} · Контроль окупаемости",
+              "заголовок блока 05")
+    edit_text("brief.ops_total", f"{ADMIN_MARK}: всего {{hours}} ч/мес",
+              "итог рутины в чате", probe=f"{ADMIN_MARK}: всего")
+    edit_text("brief.hint", f"{ADMIN_MARK}: полный отчёт — кнопкой «{{pdf}}».",
+              "подсказ про PDF в чате", probe=f"{ADMIN_MARK}: полный отчёт")
+    edit_text("report.effect_note", f"{ADMIN_MARK}: человек остаётся на исключениях.",
+              "сноска блока 03 в отчёте")
+    edit_text("report.col_owner", f"{ADMIN_MARK} · Кто отвечает",
+              "колонка ответственных в таблице 04")
     tree["buttons"]["final"]["pdf"] = f"📄 {ADMIN_MARK}-отчёт"
     shown["кнопка полного отчёта"] = tree["buttons"]["final"]["pdf"]
 
@@ -380,7 +396,7 @@ def admin_overlay():
     tool["label"] = f"{ADMIN_MARK}-инструмент"
     shown["инструмент оптимизации"] = tool["label"]
     tool["what"] = f"{ADMIN_MARK}-что делает инструмент"
-    shown["назначение инструмента"] = tool["what"]
+    silent["назначение инструмента"] = tool["what"]
     tool["pilot"] = f"{ADMIN_MARK}-пилот инструмента"
     shown["пилот инструмента"] = tool["pilot"]
     cat["checklist"][0]["short"] = f"{ADMIN_MARK}-шаг в чате"
@@ -389,6 +405,21 @@ def admin_overlay():
     shown["подробный шаг чек-листа"] = cat["checklist"][1]["title"]
     cat["checklist"][2]["body"] = f"{ADMIN_MARK} пояснение шага внедрения"
     shown["тело шага внедрения"] = cat["checklist"][2]["body"]
+    cat["checklist"][3]["result"] = f"{ADMIN_MARK}-результат шага"
+    shown["результат шага внедрения"] = cat["checklist"][3]["result"]
+    cat["checklist"][4]["owner"] = f"{ADMIN_MARK}-кто отвечает"
+    shown["ответственный за шаг"] = cat["checklist"][4]["owner"]
+    cat["checklist"][5]["when"] = f"{ADMIN_MARK}-срок шага"
+    shown["срок шага внедрения"] = cat["checklist"][5]["when"]
+    # Точки контроля: `short` читается в чате, `check` — только в таблице 05.
+    cat["controls"][0]["short"] = f"{ADMIN_MARK}-точка в чате"
+    shown["короткая точка контроля"] = cat["controls"][0]["short"]
+    cat["controls"][1]["point"] = f"{ADMIN_MARK}-название точки"
+    shown["название точки контроля"] = cat["controls"][1]["point"]
+    # Подстановку {money} не выбрасываем: админка ругается на пропавшую
+    # переменную, а чекер следит, чтобы расчётная сумма доехала до отчёта.
+    cat["controls"][2]["check"] = f"{ADMIN_MARK}: факт против расчётных {{money}}"
+    shown["проверка в точке контроля"] = f"{ADMIN_MARK}: факт против"
     return tree, shown, silent
 
 

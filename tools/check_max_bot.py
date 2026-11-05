@@ -12,6 +12,9 @@
 """
 import json
 import os
+import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -28,6 +31,7 @@ os.environ.update({
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import max_bot  # noqa: E402
+import content  # noqa: E402
 import optimizer  # noqa: E402
 
 SENT = []
@@ -158,9 +162,14 @@ texts = texts_to()
 results.append(check("есть часы и стоимость рутины", any("Часы рутины" in t for t in texts)))
 results.append(check("есть экономия", any("Экономия" in t for t in texts)))
 results.append(check("есть чек-лист внедрения", any("Чек-лист внедрения" in t for t in texts)))
+# «Примерный бюджет» был подписью старого rollout; в короткой форме блока 03
+# остаётся само число, а подпись живёт в PDF. Дисклеймер — отдельное сообщение.
+fin_sav = (session_of() or {}).get("sav") or {}
+budget_range = optimizer.money_range(fin_sav.get("impl_low", 0),
+                                     fin_sav.get("impl_high", 0))
 results.append(check("есть бюджет и дисклеймер",
-                     any("Примерный бюджет" in t for t in texts)
-                     and any("Дисклеймер" in t for t in texts)))
+                     any(budget_range in t for t in texts)
+                     and any("Дисклеймер" in t for t in texts), budget_range))
 results.append(check("в финале кнопка заявки",
                      any(b.get("payload") == "opt:fb" for b in all_buttons())))
 
@@ -416,14 +425,33 @@ results.append(check("при пустом кэше диалогов шаг ух�
 max_bot.remember_dialog(USER, DIALOG)
 max_bot.remember_dialog(USER2, DIALOG2)
 
-short_chat = optimizer.text_checklist({"ops": []}, {"tools": []})
-results.append(check("чек-лист в чате — одна строка на шаг и влезает в лимит",
-                     len(short_chat) <= optimizer.TEXT_CHUNK
-                     and short_chat.count("\n") >= 7
-                     and any(ch in short_chat for ch in "🎯📝🔑📏📈")))
-results.append(check("полная версия остаётся где взять",
-                     "Чек-лист внедрения — подробно" in
-                     optimizer.checklist_full_text({"ops": []}, {"tools": []})))
+# Короткая форма в чате, полная — файлом, и та же полная — текстом, если файла
+# нет. Все три рисуют один report_blocks(): «05 ·» обязан найтись и в чате, и в
+# текстовом отчёте, а цифра экономии — быть одной и той же строкой везде.
+state = optimizer.new_session()
+state.update(sphere="it", sphere_label="IT / продукт", mode="team",
+             roles=[{"label": "Разработчик", "count": 8, "rate": 600}],
+             ops=["ticket", "metrics"], tools=["chat", "n8n"])
+calc = optimizer.compute_routine(state)
+sav = optimizer.compute_savings(state, calc)
+brief_parts = optimizer.chunk(optimizer.text_brief(state, calc, sav))
+report_plain = optimizer.report_text(state, calc, sav)
+results.append(check("короткая форма — все пять блоков, не больше двух сообщений",
+                     all(f"{i:02d} ·" in "\n".join(brief_parts) for i in range(1, 6))
+                     and len(brief_parts) <= 2,
+                     f"{len(brief_parts)} сообщ., "
+                     f"{sum(len(part) for part in brief_parts)} симв."))
+results.append(check("полная форма текстом — те же пять блоков, дисклеймер и канал",
+                     all(f"{i:02d} ·" in report_plain for i in range(1, 6))
+                     and content.text("report.howto") in report_plain
+                     and content.text("report.channel_line",
+                                      channel=optimizer.CHANNEL_URL) in report_plain))
+saved_money = optimizer.money(sav["saved_money"])
+report_json = json.dumps(optimizer.report_data(state, calc, sav), ensure_ascii=False)
+results.append(check("одна цифра экономии в чате, в тексте и в структуре для PDF",
+                     saved_money in "\n".join(brief_parts)
+                     and saved_money in report_plain and saved_money in report_json,
+                     saved_money))
 
 # заглушка на `requests` стоит в начале файла: загрузка файла в MAX не должна
 # уходить в сеть даже в секциях, которым PDF не нужен (иначе проверка «без сети»
@@ -483,6 +511,60 @@ else:
     results.append(check("одинаковый отчёт даёт одинаковые байты PDF", False,
                          "в сессии нет готового расчёта"))
 
+# Шапки таблиц живёт только в вёрстке PDF (в коде текста их нет), и пропавшую
+# шапку глаз замечает не всегда — смотрим сам файл. `pdftotext` есть не везде:
+# где его нет, проверка честно говорит «не выполнена», а не проходит молча.
+def pdf_text(data):
+    """Текст, который читатель видит в файле, — если в системе есть poppler."""
+    tool = shutil.which("pdftotext")
+    if not tool or not data:
+        return None
+    with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
+        handle.write(max_bot.report_bytes(data))
+        handle.flush()
+        out = subprocess.run([tool, "-layout", handle.name, "-"],
+                             capture_output=True, text=True)
+        return out.stdout if out.returncode == 0 else None
+
+
+rendered_pdf = pdf_text(report)
+if rendered_pdf is None:
+    print("::warning::нет pdftotext — шапки таблиц в PDF не проверены")
+else:
+    # Метки берём из первого слова подписи: в узких колонках заголовок
+    # переносится («Часы в | месяц»), и искать строку целиком нельзя.
+    def head_marks(block):
+        return [re.sub(r"<[^>]+>", "", str(col.get("label", ""))).strip().split()[0]
+                for col in block["columns"]
+                if len(re.sub(r"<[^>]+>", "", str(col.get("label", ""))).strip()) > 1]
+
+    tables = [block for block in (report or {}).get("blocks", [])
+              if block.get("kind") == "table" and block.get("rows")]
+    missing = {block["num"]: [mark for mark in head_marks(block)
+                              if mark not in rendered_pdf]
+               for block in tables}
+    results.append(check("у каждой таблицы в PDF есть шапка с колонками",
+                         all(not marks for marks in missing.values()),
+                         " · ".join(f"{num}: {marks}" for num, marks in missing.items()
+                                    if marks) or f"таблиц {len(tables)}"))
+    # Самая длинная таблица может уйти на следующую страницу — тогда шапка
+    # обязана напечататься и там (иначе у продолжения колонки без подписей).
+    # `pdftotext` ставит \f и после последней страницы — пустые куски отбрасываем,
+    # иначе «страниц-продолжений» стало бы больше, чем страниц в файле.
+    pages = [page for page in rendered_pdf.split("\f") if page.strip()]
+    big = max(tables, key=lambda block: len(block["rows"])) if tables else None
+    tail = ""
+    if big:
+        tail = re.sub(r"<[^>]+>", "", str(big["rows"][-1][1])).strip().split(" ")[0]
+    if big and len(pages) > 1 and tail and tail not in pages[0]:
+        results.append(check("шапка таблицы печатается и на странице-продолжении",
+                             big["columns"][1]["label"].split()[0] in pages[-1],
+                             f"«{big['columns'][1]['label']}» на {len(pages)} стр., "
+                             f"последняя строка «{tail}»"))
+    else:
+        print(f"пропуск: таблица {big['num'] if big else '—'} целиком на одной "
+              f"странице — повтор шапки негде проверять")
+
 # кнопка «Полный отчёт (PDF)» живёт и под закрытой заявкой: регресс на «сессия
 # очищена» — клик давал «сначала пройдём шаги» вместо файла
 del UP[:]
@@ -510,8 +592,10 @@ max_bot.report_pdf.available = lambda: False
 reset()
 click("opt:p:report")
 texts = texts_to()
-results.append(check("без PDF-библиотеки чек-лист уезжает текстом",
-                     any("Чек-лист внедрения — подробно" in t for t in texts)))
+results.append(check("без PDF-библиотеки отчёт уезжает текстом",
+                     all(f"{i:02d} ·" in "\n".join(texts) for i in range(1, 6))
+                     and content.text("report.howto") in "\n".join(texts),
+                     f"{len(texts)} сообщ."))
 max_bot.report_pdf.available = real_available
 
 # заявка владельцу приезжает с тем же PDF, загруженным его токеном
@@ -542,8 +626,6 @@ max_bot.TOKEN = saved
 # обязательства: файл не должен быть битым (иначе бот молча вернётся к
 # код-дефолтам), и строка из файла должна оказаться в доставленном сообщении.
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-import content  # noqa: E402
-
 wf = open(os.path.join(REPO, ".github", "workflows", "run-optimizer.yml"),
           encoding="utf-8").read()
 results.append(check("контент в репозитории загружен без предупреждений",
@@ -607,24 +689,31 @@ optimizer.refresh_catalog()
 results.append(check("после съёма оверлея возвращаемся к боевому файлу",
                      content.text("intro") != MARKER and content.warnings() == []))
 
-# Вёрстка пустыми строками: она отделяет строку бюджета от «Сопровождение:»,
+# Блочная вёрстка: пустая строка отделяет заголовок блока от предыдущей строки,
 # а дисклеймер — от призыва отправить заявку. Теряется на любом из шагов
-# (файл → оверлей → подстановка → резка), и в чате получается склеенная строка.
+# (файл → оверлей → подстановка → резка), и в чате получается склеенная простыня.
 del SENT[:]
 final = run_flow(USER2)
 delivered = texts_to(DIALOG2)
-support_label = (content.get("texts.rollout.support") or "").split("{")[0]
-disclaimer = content.text("rollout.disclaimer").rstrip()
+head3 = content.text("brief.block", num="03",
+                     title=content.text("report.section_effect")).lstrip("\n")
+results.append(check("заголовок блока 03 отделён в чате пустой строкой",
+                     any(f"\n\n{head3}" in t for t in delivered), repr(head3[:28])))
+brief_parts = optimizer.chunk(optimizer.text_brief(
+    final, final.get("calc") or {}, final.get("sav") or {}))
+lost = [part[:46] for part in brief_parts if part not in delivered]
+results.append(check("короткая форма приходит целиком, с пустыми строками",
+                     bool(brief_parts) and not lost, "; ".join(lost[:2])))
+
+disclaimer = content.text("rollout.disclaimer",
+                              howto=content.text("report.howto_body")).rstrip()
 cta = content.text("rollout.cta").lstrip("\n")
-results.append(check("строка сопровождения начинается с пустой строки",
-                     bool(support_label.startswith("\n"))
-                     and any(t for t in delivered if support_label in t),
-                     repr(support_label[:24])))
 results.append(check("дисклеймер и призыв разделены пустой строкой",
                      any(f"{disclaimer}\n\n{cta}" in t for t in delivered)))
 results.append(check("в доставленных текстах нет склеенных строк",
                      not any(disclaimer + cta in t for t in delivered),
                      next((t[:60] for t in delivered if disclaimer + cta in t), "")))
+
 # То, что отрендерил код, должно прийти в MAX байт в байт.
 from_rollout = []
 for part in optimizer.text_rollout(final.get("sav") or {}):
