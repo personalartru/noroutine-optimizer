@@ -29,6 +29,7 @@ import sys
 import time
 
 import requests
+import tempfile
 
 import optimizer
 import content
@@ -175,7 +176,21 @@ def answer_callback(callback_id, text):
 
 
 # ── Файлы в MAX ──────────────────────────────────────────────────────────────
-UPLOADS = {}
+class _BoundedCache:
+    """Простой кэш с ограничением размера (LRU-like) для предотвращения утечек памяти."""
+    def __init__(self, max_size=50):
+        self.max_size = max_size
+        self._cache = {}
+
+    def get(self, key):
+        return self._cache.get(key)
+
+    def set(self, key, value):
+        if len(self._cache) >= self.max_size:
+            self._cache.pop(next(iter(self._cache)))
+        self._cache[key] = value
+
+UPLOADS = _BoundedCache(max_size=50)
 
 
 def upload_file(data, filename="report.pdf", mime="application/pdf", token=None):
@@ -186,8 +201,8 @@ def upload_file(data, filename="report.pdf", mime="application/pdf", token=None)
     Токен файла привязан к загрузившему боту, поэтому кэш по (хэш, токен).
     """
     key = (hashlib.sha1(data).hexdigest(), token or TOKEN, filename)
-    if key in UPLOADS:
-        return UPLOADS[key]
+    if UPLOADS.get(key):
+        return UPLOADS.get(key)
     headers = {"Authorization": token or TOKEN}
     r = requests.post(f"{MAX_API}/uploads", params={"type": "file"},
                       headers=headers, timeout=60)
@@ -208,7 +223,7 @@ def upload_file(data, filename="report.pdf", mime="application/pdf", token=None)
                       or payload.get("token"))
     if not file_token:
         raise RuntimeError("MAX не вернул токен файла")
-    UPLOADS[key] = file_token
+    UPLOADS.set(key, file_token)
     print(f"Файл загружен в MAX: {filename} ({len(data)} байт)")
     return file_token
 
@@ -384,23 +399,36 @@ def load_json(path):
 
 
 def save_json(path, data):
+    """Атомарное сохранение JSON: защита от повреждения при обрыве записи."""
+    dir_name = os.path.dirname(path) or "."
+    os.makedirs(dir_name, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(dir=dir_name, text=True, encoding="utf-8")
     try:
-        with open(path, "w", encoding="utf-8") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=1)
+        os.replace(temp_path, path)
         return True
     except OSError as e:
         print(f"Не удалось сохранить {path}:", e)
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
         return False
 
 
 def save_text(path, text):
-    """Как save_json, только уже готовый текст: скачанный файл не пересобираем."""
+    """Атомарное сохранение текста: защита от повреждения при обрыве записи."""
+    dir_name = os.path.dirname(path) or "."
+    os.makedirs(dir_name, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(dir=dir_name, text=True, encoding="utf-8")
     try:
-        with open(path, "w", encoding="utf-8") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
+        os.replace(temp_path, path)
         return True
     except OSError as e:
         print(f"Не удалось сохранить {path}:", e)
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
         return False
 
 
@@ -496,9 +524,9 @@ def load_offset():
 
 
 def save_offset(offset):
+    """Атомарное сохранение offset через save_text."""
     try:
-        with open(OFFSET_FILE, "w", encoding="utf-8") as f:
-            f.write(str(offset))
+        save_text(OFFSET_FILE, str(offset))
     except OSError:
         pass
 
@@ -551,9 +579,9 @@ def content_source():
 def fetch_content(url, headers):
     """Текст content.json из main или None: сетевая осечка не роняет цикл."""
     try:
-        r = requests.get(url, headers=headers, timeout=15)
+        r = requests.get(url, headers=headers, timeout=5)
     except requests.RequestException as e:
-        print("::warning::content.json не скачался:", str(e)[:160],
+        print("::warning::content.json не скачался (сеть/таймаут):", str(e)[:160],
               "— оставляю прежний оверлей")
         return None
     if r.status_code != 200:

@@ -1100,7 +1100,15 @@ def dispatch_text(text, session):
         match = re.search(r"\d+", text or "")
         if not match:
             return session, emit(content.text("errors.need_number"))
-        record_role(session, role["label"], int(match.group()), role["rate"])
+        
+        count = int(match.group())
+        if count > MAX_HEADCOUNT:
+            return session, emit(
+                f"Максимальное количество для расчёта — {MAX_HEADCOUNT} человек. "
+                f"Пожалуйста, укажите число меньше или свяжитесь с нами для корпоративного расчёта."
+            )
+            
+        record_role(session, role["label"], count, role["rate"])
         session["pending_role"] = None
         return ask_count(session)
 
