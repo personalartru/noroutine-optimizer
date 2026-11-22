@@ -558,6 +558,8 @@ def checklist_steps(calc, sav):
     return steps
 
 
+
+
 def payback_months(payback):
     """«1,2» / «7» / «—» — одна формулировка окупаемости для всех носителей."""
     if not payback:
@@ -728,7 +730,7 @@ def report_blocks(session, calc, sav):
                      {"label": rep("report.col_do"), "width": 32},
                      {"label": rep("report.col_result"), "width": 25},
                      {"label": rep("report.col_owner"), "width": 17}],
-         "rows": checklist_rows,  # <-- теперь с phase
+         "rows": checklist_rows,
          "empty": rep("report.none"),
          "note": rep("report.roles_note")},
         {"num": "05", "title": rep("report.section_control"), "kind": "table",
