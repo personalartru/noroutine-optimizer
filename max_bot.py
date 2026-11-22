@@ -190,6 +190,9 @@ class _BoundedCache:
             self._cache.pop(next(iter(self._cache)))
         self._cache[key] = value
 
+    def clear(self):
+        self._cache.clear()
+
 UPLOADS = _BoundedCache(max_size=50)
 
 
@@ -402,7 +405,7 @@ def save_json(path, data):
     """Атомарное сохранение JSON: защита от повреждения при обрыве записи."""
     dir_name = os.path.dirname(path) or "."
     os.makedirs(dir_name, exist_ok=True)
-    fd, temp_path = tempfile.mkstemp(dir=dir_name, text=True, encoding="utf-8")
+    fd, temp_path = tempfile.mkstemp(dir=dir_name, text=True)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=1)
@@ -419,7 +422,7 @@ def save_text(path, text):
     """Атомарное сохранение текста: защита от повреждения при обрыве записи."""
     dir_name = os.path.dirname(path) or "."
     os.makedirs(dir_name, exist_ok=True)
-    fd, temp_path = tempfile.mkstemp(dir=dir_name, text=True, encoding="utf-8")
+    fd, temp_path = tempfile.mkstemp(dir=dir_name, text=True)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
