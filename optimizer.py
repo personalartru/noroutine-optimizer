@@ -538,7 +538,7 @@ def control_points(calc, sav):
 
 def checklist_steps(calc, sav):
     """Шаги внедрения из каталога — один источник для чата, PDF и текстового fallback.
-
+    
     `short` — строка в чате, `body`/`result`/`owner` — три колонки таблицы 04 в PDF:
     в сообщении они раздули бы финальный экран до трёх простыней.
     """
@@ -553,18 +553,9 @@ def checklist_steps(calc, sav):
             "when": content.fill(step.get("when"), values),
             "result": content.fill(step.get("result"), values),
             "owner": content.fill(step.get("owner"), values),
+            "phase": step.get("phase", ""),  # <-- добавлено для группировки в PDF
         })
     return steps
-
-
-# ── Финальный отчёт: пять блоков на один источник ─────────────────────────────
-# В чате короткая форма (text_brief), в PDF — таблицы (report_blocks через
-# report_data), а если файл в этом окружении не собрать — те же блоки
-# сообщением (report_text). Все три читают один report_numbers() и один
-# report_blocks(), поэтому цифра из чата не может разойтись с цифрой из файла:
-# расчёт живёт здесь, а не в двух вёрстках.
-
-BRIEF_OPS = 3    # сколько операций перечисляем в чате; остальные — «и ещё N»
 
 
 def payback_months(payback):
@@ -665,7 +656,7 @@ def text_brief(session, calc, sav):
 
 def report_blocks(session, calc, sav):
     """Пять блоков отчёта: строки «параметр — значение» и настоящие таблицы.
-
+    
     Здесь и формат (доли колонок, где жирная строка), и подстановки — всё, чего
     не знает ни content.py, ни вёрстка. Отчёт читают два рендера: report_pdf.py
     печатает файл, report_text() отдаёт то же сообщение, если файла нет.
@@ -675,6 +666,21 @@ def report_blocks(session, calc, sav):
     ops = sorted(calc.get("ops") or [], key=lambda o: -o["hours"])
     steps = checklist_steps(calc, sav)
     points = control_points(calc, sav)
+    
+    # Для блока 04 добавляем phase в конец каждой строки
+    checklist_rows = []
+    for i, step in enumerate(steps, start=1):
+        row = [
+            str(i),
+            rep("report.step_when", title=step["title"], when=step["when"]),
+            step["body"],
+            step["result"],
+            step["owner"]
+        ]
+        if step.get("phase"):
+            row.append(step["phase"])
+        checklist_rows.append(row)
+    
     return [
         {"num": "01", "title": rep("report.section_data"), "kind": "rows",
          "rows": [
@@ -722,10 +728,7 @@ def report_blocks(session, calc, sav):
                      {"label": rep("report.col_do"), "width": 32},
                      {"label": rep("report.col_result"), "width": 25},
                      {"label": rep("report.col_owner"), "width": 17}],
-         "rows": [[str(i),
-                   rep("report.step_when", title=step["title"], when=step["when"]),
-                   step["body"], step["result"], step["owner"]]
-                  for i, step in enumerate(steps, start=1)],
+         "rows": checklist_rows,  # <-- теперь с phase
          "empty": rep("report.none"),
          "note": rep("report.roles_note")},
         {"num": "05", "title": rep("report.section_control"), "kind": "table",
